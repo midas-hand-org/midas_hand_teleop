@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "midas-hand-teleop"
+version = "0.1.0"
+description = "MediaPipe webcam teleoperation pipeline for the MIDAS hand"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mediapipe>=0.10",
+    "midas-hand-retargeter>=0.1.0",
+    "numpy>=2.0",
+    "opencv-python>=4.8",
+]
+
+[project.optional-dependencies]
+mujoco = ["mujoco>=3.0"]
+hardware = ["midas-hand>=0.1.0"]
+dev = ["pytest"]
+
+[project.scripts]
+midas-hand-teleop = "midas_hand_teleop.webcam_demo:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["midas_hand_teleop*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
