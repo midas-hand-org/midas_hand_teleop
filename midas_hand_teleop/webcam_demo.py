@@ -26,7 +26,15 @@ def _build_backend(args):
             steps_per_frame=args.mujoco_steps,
         )
     if args.backend == "hardware":
-        return HardwareBackend(configure=args.configure_hardware)
+        return HardwareBackend(
+            configure=args.configure_hardware,
+            config_path=args.hardware_config,
+            port=args.hardware_port,
+            baudrate=args.hardware_baudrate,
+            current_limit_ma=args.hardware_current_limit,
+            command_scale=args.hardware_command_scale,
+            max_step_rad=args.hardware_max_step_rad,
+        )
     raise ValueError(f"Unsupported backend: {args.backend}")
 
 
@@ -78,29 +86,88 @@ def main() -> None:
     parser.add_argument("--mujoco-viewer", action="store_true")
     parser.add_argument("--mujoco-steps", type=int, default=30)
     parser.add_argument("--configure-hardware", action="store_true")
-    parser.add_argument("--scaling-factor", type=float, default=1.15)
-    parser.add_argument("--finger-abad-gain", type=float, default=DEFAULT_TUNING.finger_abad_gain)
-    parser.add_argument("--finger-abad-limit", type=float, default=DEFAULT_TUNING.finger_abad_limit)
-    parser.add_argument("--finger-abad-deadzone", type=float, default=DEFAULT_TUNING.finger_abad_deadzone)
-    parser.add_argument("--finger-abad-alpha", type=float, default=DEFAULT_TUNING.finger_abad_alpha)
     parser.add_argument(
-        "--finger-abad-curl-damping",
-        type=float,
-        default=DEFAULT_TUNING.finger_abad_curl_damping,
+        "--hardware-config",
+        default=None,
+        help="Optional midas_hand_api calibration config. Defaults to ~/.midas_hand/config.yaml.",
     )
-    parser.add_argument("--thumb-cmc-roll-open", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_open)
-    parser.add_argument("--thumb-cmc-roll-oppose", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_oppose)
-    parser.add_argument("--thumb-cmc-side-open", type=float, default=DEFAULT_TUNING.thumb_cmc_side_open)
-    parser.add_argument("--thumb-cmc-side-oppose", type=float, default=DEFAULT_TUNING.thumb_cmc_side_oppose)
-    parser.add_argument("--thumb-mcp-closed", type=float, default=DEFAULT_TUNING.thumb_mcp_closed)
-    parser.add_argument("--thumb-dip-closed", type=float, default=DEFAULT_TUNING.thumb_dip_closed)
-    parser.add_argument("--thumb-pinch-gain", type=float, default=DEFAULT_TUNING.thumb_pinch_gain)
+    parser.add_argument(
+        "--hardware-port",
+        default=None,
+        help="Optional Dynamixel serial port override, for example /dev/ttyUSB0.",
+    )
+    parser.add_argument(
+        "--hardware-baudrate",
+        type=int,
+        default=None,
+        help="Optional Dynamixel baudrate override.",
+    )
+    parser.add_argument(
+        "--hardware-current-limit",
+        type=int,
+        default=None,
+        help="Optional current limit in mA to apply when --configure-hardware is used.",
+    )
+    parser.add_argument(
+        "--hardware-command-scale",
+        type=float,
+        default=1.0,
+        help="Scale hardware commands around calibrated zero; use 0.3-0.5 for first bring-up.",
+    )
+    parser.add_argument(
+        "--hardware-max-step-rad",
+        type=float,
+        default=0.05,
+        help="Maximum per-frame motor target change in radians; use 0 to disable slew limiting.",
+    )
+    parser.add_argument("--scaling-factor", type=float, default=1.15)
+    parser.add_argument("--finger-curl-gain", type=float, default=DEFAULT_TUNING.finger_curl_gain)
+    parser.add_argument("--finger-abad-gain", type=float, default=DEFAULT_TUNING.finger_abad_gain)
+    parser.add_argument("--finger-smoothing-alpha", type=float, default=DEFAULT_TUNING.finger_smoothing_alpha)
+    parser.add_argument("--thumb-cmc-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_gain)
+    parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
+    parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
+    parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--finger-abad-limit", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--finger-abad-deadzone", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--finger-abad-curl-damping", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-open", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-oppose", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-angle-neutral", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-angle-span", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-angle-deadzone", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-sign", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-roll-signed", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-curl-opposition-gain", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-open", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-min", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-max", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-angle-neutral", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-angle-gain", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-deadzone", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-sign", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-alpha", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-mcp-closed", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-dip-closed", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-cmc-side-oppose", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thumb-pinch-gain", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--debug-targets",
         action="store_true",
         help="Print detected handedness and active joint targets while running.",
     )
     args = parser.parse_args()
+    if args.finger_abad_alpha is not None:
+        args.finger_smoothing_alpha = args.finger_abad_alpha
+    if args.thumb_cmc_alpha is not None:
+        args.thumb_smoothing_alpha = args.thumb_cmc_alpha
+    legacy_thumb_gains = []
+    if args.thumb_mcp_closed is not None:
+        legacy_thumb_gains.append(args.thumb_mcp_closed / -0.88)
+    if args.thumb_dip_closed is not None:
+        legacy_thumb_gains.append(args.thumb_dip_closed / -0.72)
+    if legacy_thumb_gains:
+        args.thumb_flexion_gain = max(0.0, sum(legacy_thumb_gains) / len(legacy_thumb_gains))
 
     camera = int(args.camera) if str(args.camera).isdigit() else args.camera
     cap = cv2.VideoCapture(camera)
@@ -120,18 +187,12 @@ def main() -> None:
         mujoco_repo=args.mujoco_repo,
         scaling_factor=args.scaling_factor,
         tuning=RetargeterTuning(
+            finger_curl_gain=args.finger_curl_gain,
             finger_abad_gain=args.finger_abad_gain,
-            finger_abad_limit=args.finger_abad_limit,
-            finger_abad_deadzone=args.finger_abad_deadzone,
-            finger_abad_alpha=args.finger_abad_alpha,
-            finger_abad_curl_damping=args.finger_abad_curl_damping,
-            thumb_cmc_roll_open=args.thumb_cmc_roll_open,
-            thumb_cmc_roll_oppose=args.thumb_cmc_roll_oppose,
-            thumb_cmc_side_open=args.thumb_cmc_side_open,
-            thumb_cmc_side_oppose=args.thumb_cmc_side_oppose,
-            thumb_mcp_closed=args.thumb_mcp_closed,
-            thumb_dip_closed=args.thumb_dip_closed,
-            thumb_pinch_gain=args.thumb_pinch_gain,
+            finger_smoothing_alpha=args.finger_smoothing_alpha,
+            thumb_cmc_gain=args.thumb_cmc_gain,
+            thumb_flexion_gain=args.thumb_flexion_gain,
+            thumb_smoothing_alpha=args.thumb_smoothing_alpha,
         ),
     )
     pipeline = MidasTeleopPipeline(detector=detector, retargeter=retargeter)

@@ -10,6 +10,7 @@ does not own the optimizer, MuJoCo model, or hardware API:
 Install the sibling packages during development:
 
 ```bash
+pip install -e ../midas_hand_api
 pip install -e ../midas_hand_retargeter
 pip install -e .
 ```
@@ -51,12 +52,12 @@ Common live tuning overrides:
 
 ```bash
 midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets \
-  --finger-abad-gain 1.5 \
-  --finger-abad-alpha 0.16 \
-  --thumb-cmc-roll-open 1.25 \
-  --thumb-cmc-roll-oppose 0.35 \
-  --thumb-mcp-closed -0.95 \
-  --thumb-dip-closed -0.8
+  --finger-curl-gain 1.0 \
+  --finger-abad-gain 0.8 \
+  --finger-smoothing-alpha 0.16 \
+  --thumb-cmc-gain 1.0 \
+  --thumb-flexion-gain 1.0 \
+  --thumb-smoothing-alpha 0.25
 ```
 
 For persistent defaults, edit `midas_hand_retargeter/tuning.py`.
@@ -64,8 +65,25 @@ Use `--input-hand Left` or `--input-hand Right` if the MediaPipe handedness
 label flips while running. With the default `--input-hand auto`, teleop locks
 onto the first corrected physical hand to avoid convention switching jitter.
 
-Send commands to hardware after calibration:
+Send commands to hardware after calibration. Start with a low command scale and
+slow per-frame step, then increase after checking that the signs and limits are
+correct:
 
 ```bash
-midas-hand-teleop --backend hardware --configure-hardware
+midas-hand-teleop --backend hardware --show --debug-targets \
+  --configure-hardware \
+  --hardware-command-scale 0.3 \
+  --hardware-max-step-rad 0.03
+```
+
+Useful hardware overrides:
+
+```bash
+midas-hand-teleop --backend hardware --show --debug-targets \
+  --configure-hardware \
+  --hardware-config ~/.midas_hand/config.yaml \
+  --hardware-port /dev/ttyUSB0 \
+  --hardware-current-limit 350 \
+  --hardware-command-scale 0.3 \
+  --hardware-max-step-rad 0.03
 ```
