@@ -57,14 +57,7 @@ Common live tuning overrides:
 
 ```bash
 midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets \
-  --finger-curl-gain 1.0 \
-  --finger-abad-gain 0.8 \
-  --finger-smoothing-alpha 0.16 \
-  --thumb-cmc-gain 1.0 \
-  --thumb-cmc-side-gain 1.0 \
-  --thumb-cmc-roll-gain 1.0 \
-  --thumb-flexion-gain 1.0 \
-  --thumb-smoothing-alpha 0.25
+  --no-lock-input-hand
 ```
 
 For persistent defaults, edit `midas_hand_retargeter/tuning.py`.
@@ -78,25 +71,12 @@ interpolated commands at `--hardware-rate-hz`. Start with a low command scale
 and slow per-tick step, then increase after checking that the signs and limits
 are correct:
 
+Recommended tuned params: 
 ```bash
 midas-hand-teleop --backend hardware --show --debug-targets \
   --configure-hardware \
-  --hardware-command-scale 0.3 \
-  --hardware-max-step-rad 0.03 \
+  --hardware-command-scale 1.0 \
+  --hardware-max-step-rad 0.1 \
   --hardware-rate-hz 50 \
-  --hardware-interpolation-alpha 0.25
-```
-
-Useful hardware overrides:
-
-```bash
-midas-hand-teleop --backend hardware --show --debug-targets \
-  --configure-hardware \
-  --hardware-config ~/.midas_hand/config.yaml \
-  --hardware-port /dev/ttyUSB0 \
-  --hardware-current-limit 350 \
-  --hardware-command-scale 0.3 \
-  --hardware-max-step-rad 0.03 \
-  --hardware-rate-hz 50 \
-  --hardware-interpolation-alpha 0.25
+  --hardware-interpolation-alpha 0.4
 ```

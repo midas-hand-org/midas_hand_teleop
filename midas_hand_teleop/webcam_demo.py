@@ -126,7 +126,7 @@ def main() -> None:
     parser.add_argument(
         "--hardware-max-step-rad",
         type=float,
-        default=0.05,
+        default=0.1,
         help="Maximum per-hardware-tick motor target change in radians; use 0 to disable slew limiting.",
     )
     parser.add_argument(
