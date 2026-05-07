@@ -57,5 +57,15 @@ class MidasTeleopPipeline:
             retargeting=retargeting,
         )
 
+    def calibrate_neutral_from_last_frame(self) -> dict[str, float]:
+        """Use the latest retargeted pose as the neutral command reference."""
+
+        return self.retargeter.calibrate_neutral_from_last_frame()
+
+    def clear_neutral_offsets(self) -> None:
+        """Clear retargeter neutral calibration references."""
+
+        self.retargeter.clear_neutral_offsets()
+
     def close(self) -> None:
         self.detector.close()

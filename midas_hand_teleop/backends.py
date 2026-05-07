@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -106,9 +107,10 @@ class MujocoBackend:
 class HardwareBackend:
     """Send 13 active motor positions to ``midas_hand_api``.
 
-    The backend starts from the measured motor positions and rate-limits toward
-    each retargeted target. This avoids a large first-frame jump when torque is
-    enabled on the real hand.
+    Vision/retargeting frames can arrive with irregular timing, so hardware
+    commands are sent from a fixed-rate loop. ``send`` only updates the latest
+    desired target; the command loop interpolates from the previous command
+    toward that target at ``update_rate_hz``.
     """
 
     def __init__(
@@ -122,11 +124,19 @@ class HardwareBackend:
         current_limit_ma: int | None = None,
         command_scale: float = 1.0,
         max_step_rad: float = 0.05,
+        update_rate_hz: float = 50.0,
+        interpolation_alpha: float = 0.35,
     ):
         from midas_hand_api import DEFAULT_CONFIG_PATH, HandConfig, MidasHand
 
         self.command_scale = float(command_scale)
         self.max_step_rad = float(max_step_rad)
+        self.update_rate_hz = float(update_rate_hz)
+        self.interpolation_alpha = float(np.clip(interpolation_alpha, 0.0, 1.0))
+        self._lock = threading.Lock()
+        self._closed = False
+        self._loop_error: Exception | None = None
+        self._command_thread: threading.Thread | None = None
         config = self._load_config(HandConfig, DEFAULT_CONFIG_PATH, config_path)
         updates = {}
         if port is not None:
@@ -142,26 +152,71 @@ class HardwareBackend:
         if configure:
             self.hand.configure(enable_torque=False)
         self._last_command = self._read_start_positions()
+        self._target_command = self._last_command.copy()
         self.hand.set_positions(self._last_command, clip=True)
         if configure:
             self.hand.enable_torque()
+        if self.update_rate_hz > 0:
+            self._command_thread = threading.Thread(
+                target=self._run_command_loop,
+                name="midas-hardware-command-loop",
+                daemon=True,
+            )
+            self._command_thread.start()
 
     def send(self, result: RetargetingResult) -> None:
-        target = np.asarray(result.hardware_motor_positions, dtype=np.float64)
-        target *= self.command_scale
-        target = self.hand.clip_positions(target)
-        if self.max_step_rad > 0:
-            delta = np.clip(
-                target - self._last_command,
-                -self.max_step_rad,
-                self.max_step_rad,
-            )
-            target = self._last_command + delta
-        self.hand.set_positions(target, clip=True)
-        self._last_command = target
+        if self._loop_error is not None:
+            raise RuntimeError("Hardware command loop failed") from self._loop_error
+        target = self._prepare_target(result)
+        if self.update_rate_hz <= 0:
+            self._send_interpolated_command(target)
+            return
+        with self._lock:
+            self._target_command = target
 
     def close(self) -> None:
+        with self._lock:
+            self._closed = True
+        if self._command_thread is not None:
+            self._command_thread.join(timeout=1.0)
         self.hand.shutdown()
+
+    def _prepare_target(self, result: RetargetingResult) -> np.ndarray:
+        target = np.asarray(result.hardware_motor_positions, dtype=np.float64)
+        target *= self.command_scale
+        return self.hand.clip_positions(target)
+
+    def _run_command_loop(self) -> None:
+        period_s = 1.0 / max(self.update_rate_hz, 1e-6)
+        next_tick = time.monotonic()
+        while True:
+            with self._lock:
+                if self._closed:
+                    return
+                target = self._target_command.copy()
+            try:
+                self._send_interpolated_command(target)
+            except Exception as exc:
+                self._loop_error = exc
+                print(f"Hardware command loop stopped: {exc}")
+                return
+
+            next_tick += period_s
+            sleep_s = next_tick - time.monotonic()
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+            else:
+                next_tick = time.monotonic()
+
+    def _send_interpolated_command(self, target: np.ndarray) -> None:
+        delta = target - self._last_command
+        if self.interpolation_alpha < 1.0:
+            delta *= self.interpolation_alpha
+        if self.max_step_rad > 0:
+            delta = np.clip(delta, -self.max_step_rad, self.max_step_rad)
+        command = self._last_command + delta
+        self.hand.set_positions(command, clip=True)
+        self._last_command = command
 
     @staticmethod
     def _load_config(HandConfig, default_config_path, config_path: str | None):

@@ -30,6 +30,11 @@ label and the corrected input hand:
 midas-hand-teleop --show --backend print --debug-targets
 ```
 
+When `--show` is enabled, hold the human hand in the pose that should command
+MIDAS zero and press `c` to capture retargeter neutral calibration. Press `r`
+to clear it. This calibration is applied before print, MuJoCo, or hardware
+output while preserving the robot joint limits on each side of zero.
+
 For an unmirrored OpenCV webcam feed, MediaPipe's raw handedness label is often
 opposite the physical hand. If you mirror the camera image before detection,
 pass `--selfie`.
@@ -56,6 +61,8 @@ midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets \
   --finger-abad-gain 0.8 \
   --finger-smoothing-alpha 0.16 \
   --thumb-cmc-gain 1.0 \
+  --thumb-cmc-side-gain 1.0 \
+  --thumb-cmc-roll-gain 1.0 \
   --thumb-flexion-gain 1.0 \
   --thumb-smoothing-alpha 0.25
 ```
@@ -65,15 +72,19 @@ Use `--input-hand Left` or `--input-hand Right` if the MediaPipe handedness
 label flips while running. With the default `--input-hand auto`, teleop locks
 onto the first corrected physical hand to avoid convention switching jitter.
 
-Send commands to hardware after calibration. Start with a low command scale and
-slow per-frame step, then increase after checking that the signs and limits are
-correct:
+Send commands to hardware after calibration. The hardware backend runs its own
+fixed-rate command loop, so vision frames update the target while motors receive
+interpolated commands at `--hardware-rate-hz`. Start with a low command scale
+and slow per-tick step, then increase after checking that the signs and limits
+are correct:
 
 ```bash
 midas-hand-teleop --backend hardware --show --debug-targets \
   --configure-hardware \
   --hardware-command-scale 0.3 \
-  --hardware-max-step-rad 0.03
+  --hardware-max-step-rad 0.03 \
+  --hardware-rate-hz 50 \
+  --hardware-interpolation-alpha 0.25
 ```
 
 Useful hardware overrides:
@@ -85,5 +96,7 @@ midas-hand-teleop --backend hardware --show --debug-targets \
   --hardware-port /dev/ttyUSB0 \
   --hardware-current-limit 350 \
   --hardware-command-scale 0.3 \
-  --hardware-max-step-rad 0.03
+  --hardware-max-step-rad 0.03 \
+  --hardware-rate-hz 50 \
+  --hardware-interpolation-alpha 0.25
 ```

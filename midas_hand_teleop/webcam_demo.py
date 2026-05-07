@@ -34,8 +34,17 @@ def _build_backend(args):
             current_limit_ma=args.hardware_current_limit,
             command_scale=args.hardware_command_scale,
             max_step_rad=args.hardware_max_step_rad,
+            update_rate_hz=args.hardware_rate_hz,
+            interpolation_alpha=args.hardware_interpolation_alpha,
         )
     raise ValueError(f"Unsupported backend: {args.backend}")
+
+
+def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
+    return {
+        name: round(value, 3)
+        for name, value in values.items()
+    }
 
 
 def main() -> None:
@@ -118,13 +127,27 @@ def main() -> None:
         "--hardware-max-step-rad",
         type=float,
         default=0.05,
-        help="Maximum per-frame motor target change in radians; use 0 to disable slew limiting.",
+        help="Maximum per-hardware-tick motor target change in radians; use 0 to disable slew limiting.",
+    )
+    parser.add_argument(
+        "--hardware-rate-hz",
+        type=float,
+        default=50.0,
+        help="Fixed hardware command update rate in Hz; use 0 to send directly from the vision loop.",
+    )
+    parser.add_argument(
+        "--hardware-interpolation-alpha",
+        type=float,
+        default=0.35,
+        help="Fraction of remaining target distance to move each hardware tick; lower is smoother.",
     )
     parser.add_argument("--scaling-factor", type=float, default=1.15)
     parser.add_argument("--finger-curl-gain", type=float, default=DEFAULT_TUNING.finger_curl_gain)
     parser.add_argument("--finger-abad-gain", type=float, default=DEFAULT_TUNING.finger_abad_gain)
     parser.add_argument("--finger-smoothing-alpha", type=float, default=DEFAULT_TUNING.finger_smoothing_alpha)
     parser.add_argument("--thumb-cmc-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_gain)
+    parser.add_argument("--thumb-cmc-side-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_side_gain)
+    parser.add_argument("--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain)
     parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
     parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
@@ -191,6 +214,8 @@ def main() -> None:
             finger_abad_gain=args.finger_abad_gain,
             finger_smoothing_alpha=args.finger_smoothing_alpha,
             thumb_cmc_gain=args.thumb_cmc_gain,
+            thumb_cmc_side_gain=args.thumb_cmc_side_gain,
+            thumb_cmc_roll_gain=args.thumb_cmc_roll_gain,
             thumb_flexion_gain=args.thumb_flexion_gain,
             thumb_smoothing_alpha=args.thumb_smoothing_alpha,
         ),
@@ -214,24 +239,33 @@ def main() -> None:
                     now = time.monotonic()
                     if now - last_debug_print >= 0.5:
                         last_debug_print = now
-                        compact = {
-                            name: round(value, 3)
-                            for name, value in teleop_frame.active_joint_positions.items()
-                        }
                         print(
                             "hand "
                             f"MP={hand_frame.mediapipe_hand_type} "
                             f"input={hand_frame.input_hand_type} "
                             f"robot={hand_frame.robot_hand_type} "
                             f"mirrored={hand_frame.mirrored}: "
-                            f"{compact}"
+                            f"{_compact_joint_values(teleop_frame.active_joint_positions)}"
                         )
 
             if args.show:
                 detector.draw_landmarks(bgr, hand_frame)
                 cv2.imshow("midas_hand_teleop", bgr)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
                     break
+                if key == ord("c"):
+                    if teleop_frame is None:
+                        print("No hand frame available for neutral calibration.")
+                    else:
+                        offsets = pipeline.calibrate_neutral_from_last_frame()
+                        print(
+                            "Captured retargeter neutral offsets: "
+                            f"{_compact_joint_values(offsets)}"
+                        )
+                if key == ord("r"):
+                    pipeline.clear_neutral_offsets()
+                    print("Cleared retargeter neutral offsets.")
     except KeyboardInterrupt:
         pass
     finally:
