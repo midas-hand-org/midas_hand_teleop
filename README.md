@@ -15,10 +15,21 @@ pip install -e ../midas_hand_retargeter
 pip install -e .
 ```
 
-Print retargeted active joint targets from a webcam:
+By default the console entrypoint uses the current hardware test profile:
+hardware backend, webcam display, debug target printing, `/dev/ttyUSB0`,
+350 mA current limit, 50 Hz interpolated hardware commands, no input-hand lock,
+and `pip_dip_lookup` passive coupling.
+
+Run the hardware teleop profile:
 
 ```bash
-midas-hand-teleop --show --backend print
+midas-hand-teleop
+```
+
+Print retargeted active joint targets from a webcam instead:
+
+```bash
+midas-hand-teleop --backend print
 ```
 
 The MIDAS MuJoCo model is currently a right hand. By default the teleop demo
@@ -62,8 +73,9 @@ midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets \
 
 For persistent defaults, edit `midas_hand_retargeter/tuning.py`.
 Use `--input-hand Left` or `--input-hand Right` if the MediaPipe handedness
-label flips while running. With the default `--input-hand auto`, teleop locks
-onto the first corrected physical hand to avoid convention switching jitter.
+label flips while running. The current default allows auto input handedness to
+switch; pass `--lock-input-hand` to lock onto the first corrected physical hand
+and avoid convention switching jitter.
 
 Send commands to hardware after calibration. The hardware backend runs its own
 fixed-rate command loop, so vision frames update the target while motors receive
@@ -71,12 +83,11 @@ interpolated commands at `--hardware-rate-hz`. Start with a low command scale
 and slow per-tick step, then increase after checking that the signs and limits
 are correct:
 
-Recommended tuned params: 
+Recommended tuned params are now the defaults:
+
 ```bash
-midas-hand-teleop --backend hardware --show --debug-targets \
-  --configure-hardware \
-  --hardware-command-scale 1.0 \
-  --hardware-max-step-rad 0.1 \
-  --hardware-rate-hz 50 \
-  --hardware-interpolation-alpha 0.4
+midas-hand-teleop
 ```
+
+Override any default directly, for example `--hardware-max-step-rad 0.08`,
+`--no-debug-targets`, `--no-show`, or `--coupling-mode fixed_passive`.

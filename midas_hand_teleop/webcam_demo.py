@@ -8,11 +8,25 @@ import time
 import cv2
 
 from midas_hand_retargeter import MidasHandRetargeter
+from midas_hand_retargeter.adaptor import PIP_DIP_LOOKUP_MODE, SUPPORTED_COUPLING_MODES
 from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
 
 from .backends import HardwareBackend, MujocoBackend, PrintBackend
 from .detector import MediaPipeHandDetector
 from .pipeline import MidasTeleopPipeline
+
+
+DEFAULT_BACKEND = "hardware"
+DEFAULT_CONFIGURE_HARDWARE = True
+DEFAULT_DEBUG_TARGETS = True
+DEFAULT_HARDWARE_PORT = "/dev/ttyUSB0"
+DEFAULT_HARDWARE_CURRENT_LIMIT = 350
+DEFAULT_HARDWARE_COMMAND_SCALE = 1.0
+DEFAULT_HARDWARE_MAX_STEP_RAD = 0.15
+DEFAULT_HARDWARE_RATE_HZ = 50.0
+DEFAULT_HARDWARE_INTERPOLATION_ALPHA = 0.4
+DEFAULT_LOCK_INPUT_HAND = False
+DEFAULT_SHOW = True
 
 
 def _build_backend(args):
@@ -74,8 +88,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-lock-input-hand",
-        action="store_true",
+        dest="lock_input_hand",
+        action="store_false",
         help="Allow auto input handedness to switch while running.",
+    )
+    parser.add_argument(
+        "--lock-input-hand",
+        dest="lock_input_hand",
+        action="store_true",
+        help="Lock onto the first accepted physical input hand side.",
     )
     parser.add_argument(
         "--mirror-axis",
@@ -83,8 +104,17 @@ def main() -> None:
         default="y",
         help="MANO-frame axis to mirror when mapping left input to a right robot.",
     )
-    parser.add_argument("--show", action="store_true", help="Show webcam landmarks.")
-    parser.add_argument("--backend", choices=["print", "mujoco", "hardware"], default="print")
+    parser.add_argument(
+        "--show",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_SHOW,
+        help="Show webcam landmarks.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["print", "mujoco", "hardware"],
+        default=DEFAULT_BACKEND,
+    )
     parser.add_argument(
         "--hand-landmarker-model",
         default=None,
@@ -94,7 +124,17 @@ def main() -> None:
     parser.add_argument("--mujoco-xml", default=None)
     parser.add_argument("--mujoco-viewer", action="store_true")
     parser.add_argument("--mujoco-steps", type=int, default=30)
-    parser.add_argument("--configure-hardware", action="store_true")
+    parser.add_argument(
+        "--coupling-mode",
+        choices=SUPPORTED_COUPLING_MODES,
+        default=PIP_DIP_LOOKUP_MODE,
+        help="Passive PIP-DIP coupling model used by the retargeter.",
+    )
+    parser.add_argument(
+        "--configure-hardware",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_CONFIGURE_HARDWARE,
+    )
     parser.add_argument(
         "--hardware-config",
         default=None,
@@ -102,7 +142,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--hardware-port",
-        default=None,
+        default=DEFAULT_HARDWARE_PORT,
         help="Optional Dynamixel serial port override, for example /dev/ttyUSB0.",
     )
     parser.add_argument(
@@ -114,31 +154,31 @@ def main() -> None:
     parser.add_argument(
         "--hardware-current-limit",
         type=int,
-        default=None,
+        default=DEFAULT_HARDWARE_CURRENT_LIMIT,
         help="Optional current limit in mA to apply when --configure-hardware is used.",
     )
     parser.add_argument(
         "--hardware-command-scale",
         type=float,
-        default=1.0,
+        default=DEFAULT_HARDWARE_COMMAND_SCALE,
         help="Scale hardware commands around calibrated zero; use 0.3-0.5 for first bring-up.",
     )
     parser.add_argument(
         "--hardware-max-step-rad",
         type=float,
-        default=0.1,
+        default=DEFAULT_HARDWARE_MAX_STEP_RAD,
         help="Maximum per-hardware-tick motor target change in radians; use 0 to disable slew limiting.",
     )
     parser.add_argument(
         "--hardware-rate-hz",
         type=float,
-        default=50.0,
+        default=DEFAULT_HARDWARE_RATE_HZ,
         help="Fixed hardware command update rate in Hz; use 0 to send directly from the vision loop.",
     )
     parser.add_argument(
         "--hardware-interpolation-alpha",
         type=float,
-        default=0.35,
+        default=DEFAULT_HARDWARE_INTERPOLATION_ALPHA,
         help="Fraction of remaining target distance to move each hardware tick; lower is smoother.",
     )
     parser.add_argument("--scaling-factor", type=float, default=1.15)
@@ -176,9 +216,11 @@ def main() -> None:
     parser.add_argument("--thumb-pinch-gain", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--debug-targets",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_DEBUG_TARGETS,
         help="Print detected handedness and active joint targets while running.",
     )
+    parser.set_defaults(lock_input_hand=DEFAULT_LOCK_INPUT_HAND)
     args = parser.parse_args()
     if args.finger_abad_alpha is not None:
         args.finger_smoothing_alpha = args.finger_abad_alpha
@@ -203,12 +245,13 @@ def main() -> None:
         selfie=args.selfie,
         mirror_input=not args.no_mirror_input,
         mirror_axis=args.mirror_axis,
-        lock_input_hand=not args.no_lock_input_hand,
+        lock_input_hand=args.lock_input_hand,
         model_path=args.hand_landmarker_model,
     )
     retargeter = MidasHandRetargeter.create(
         mujoco_repo=args.mujoco_repo,
         scaling_factor=args.scaling_factor,
+        coupling_mode=args.coupling_mode,
         tuning=RetargeterTuning(
             finger_curl_gain=args.finger_curl_gain,
             finger_abad_gain=args.finger_abad_gain,
