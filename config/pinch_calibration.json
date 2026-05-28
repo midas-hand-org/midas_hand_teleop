@@ -1,0 +1,88 @@
+{
+  "feature_names": [
+    "thumb_index_tip_distance_norm",
+    "thumb_to_index_tip_palm_forward_norm",
+    "thumb_to_index_tip_palm_lateral_norm",
+    "thumb_to_index_tip_palm_normal_norm",
+    "thumb_mcp_bend_norm",
+    "thumb_ip_bend_norm",
+    "index_mcp_bend_norm",
+    "index_pip_bend_norm",
+    "index_dip_bend_norm"
+  ],
+  "feature_scales": [
+    0.11999999731779099,
+    0.20000000298023224,
+    0.20000000298023224,
+    0.20000000298023224,
+    0.18000000715255737,
+    0.18000000715255737,
+    0.18000000715255737,
+    0.18000000715255737,
+    0.18000000715255737
+  ],
+  "human_pinch_feature_vector": [
+    0.31463274359703064,
+    0.06483855098485947,
+    0.291792094707489,
+    0.09821971505880356,
+    0.07382305711507797,
+    0.15737661719322205,
+    0.282461017370224,
+    0.22500482201576233,
+    0.2281908541917801
+  ],
+  "metadata": {
+    "created_at": "2026-05-28T04:49:47+00:00",
+    "human_recorded_at": "2026-05-28T04:54:39+00:00",
+    "loaded_from": "config/pinch_calibration.json",
+    "robot_recorded_at": "2026-05-28T04:54:28+00:00",
+    "robot_source": "hardware feedback",
+    "updated_at": "2026-05-28T04:54:40+00:00"
+  },
+  "robot_joint_indices": {
+    "active_joint_indices": [
+      12,
+      11,
+      10,
+      9,
+      2,
+      1,
+      0
+    ],
+    "hardware_motor_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "robot_joint_names": [
+    "thumb_dip_joint",
+    "thumb_mcp_joint",
+    "thumb_cmc_side_joint",
+    "thumb_cmc_roll_joint",
+    "index_pip_joint",
+    "index_mcp_pitch_joint",
+    "index_mcp_abad_joint"
+  ],
+  "robot_pinch_joint_vector": [
+    -0.36201947927474976,
+    -0.11658253520727158,
+    0.12271846830844879,
+    1.6168158054351807,
+    -0.45780590176582336,
+    -0.5068350434303284,
+    -0.10897078365087509
+  ],
+  "thresholds": {
+    "activate_distance": 1.0,
+    "full_confidence_distance": 0.25,
+    "release_distance": 1.25,
+    "smoothing_alpha": 0.25
+  },
+  "version": 1
+}

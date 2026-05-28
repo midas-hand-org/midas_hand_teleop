@@ -1,8 +1,25 @@
-"""Realtime webcam demo entrypoint."""
+"""Realtime webcam demo entrypoint.
+
+Pinch calibration workflow:
+
+1. Perform the normal zero calibration by holding your hand open and pressing
+   ``c``.
+2. Teleop robot thumb and index finger in a stable pinch posture.
+3. Press ``r`` to record the robot thumb/index pinch joint values. With the
+   hardware backend this reads actual motor feedback; otherwise it records the
+   current commanded thumb/index values.
+4. Make a good thumb-index pinch gesture in front of the webcam.
+5. Press ``p`` to record the human thumb/index pinch feature vector.
+6. Press ``s`` to save the calibration.
+7. During runtime, when the human hand is close to the calibrated pinch pose,
+   only the robot thumb/index joints are blended toward the saved pinch pose.
+"""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+from pathlib import Path
 import time
 
 import cv2
@@ -13,6 +30,13 @@ from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
 
 from .backends import HardwareBackend, MujocoBackend, PrintBackend
 from .detector import MediaPipeHandDetector
+from .pinch_calibration import (
+    PinchCalibration,
+    PinchThresholds,
+    extract_pinch_features,
+    load_pinch_calibration,
+    save_pinch_calibration,
+)
 from .pipeline import MidasTeleopPipeline
 
 
@@ -27,6 +51,7 @@ DEFAULT_HARDWARE_RATE_HZ = 50.0
 DEFAULT_HARDWARE_INTERPOLATION_ALPHA = 0.4
 DEFAULT_LOCK_INPUT_HAND = False
 DEFAULT_SHOW = True
+DEFAULT_PINCH_CALIBRATION_PATH = "config/pinch_calibration.json"
 
 
 def _build_backend(args):
@@ -59,6 +84,125 @@ def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
         name: round(value, 3)
         for name, value in values.items()
     }
+
+
+def _load_pinch_calibration_if_available(
+    path: Path,
+    *,
+    thresholds: PinchThresholds,
+    enabled: bool,
+    autoload: bool,
+) -> PinchCalibration:
+    if autoload and path.exists():
+        try:
+            calibration = load_pinch_calibration(path)
+            calibration.metadata["loaded_from"] = str(path)
+            calibration.enabled = enabled
+            print(f"Loaded pinch calibration from {path}")
+            return calibration
+        except Exception as exc:
+            print(f"Could not load pinch calibration from {path}: {exc}")
+    elif autoload:
+        print(f"No pinch calibration found at {path}; use r/p/s to create one.")
+    return PinchCalibration(thresholds=thresholds, enabled=enabled)
+
+
+def _capture_robot_pinch(
+    calibration: PinchCalibration,
+    backend,
+    teleop_frame,
+) -> None:
+    read_motor_positions = getattr(backend, "read_motor_positions", None)
+    if callable(read_motor_positions):
+        try:
+            vector = calibration.record_robot_from_hardware_positions(
+                read_motor_positions()
+            )
+            print(
+                "Captured robot pinch from hardware feedback: "
+                f"{vector.round(4).tolist()}"
+            )
+            return
+        except Exception as exc:
+            print(
+                "Could not read hardware feedback for robot pinch; "
+                f"falling back to current command if available ({exc})."
+            )
+
+    if teleop_frame is None:
+        print("No teleop command available for robot pinch calibration.")
+        return
+    vector = calibration.record_robot_from_result(teleop_frame.retargeting)
+    print(
+        "Captured robot pinch from current commanded thumb/index targets: "
+        f"{vector.round(4).tolist()}"
+    )
+
+
+def _capture_human_pinch(
+    calibration: PinchCalibration,
+    teleop_frame,
+) -> None:
+    if teleop_frame is None:
+        print("No hand frame available for human pinch calibration.")
+        return
+    features = calibration.record_human(teleop_frame.landmarks)
+    print(f"Captured human pinch features: {features.round(4).tolist()}")
+
+
+def _pinch_debug_text(calibration: PinchCalibration) -> str:
+    distance = calibration.state.distance
+    distance_text = "n/a" if distance is None else f"{distance:.2f}"
+    return (
+        f"pinch loaded={calibration.is_complete} "
+        f"enabled={calibration.enabled} "
+        f"dist={distance_text} "
+        f"conf={calibration.state.confidence:.2f} "
+        f"active={calibration.state.active}"
+    )
+
+
+def _draw_pinch_overlay(bgr, calibration: PinchCalibration) -> None:
+    loaded_from = calibration.metadata.get("loaded_from")
+    loaded_text = "loaded" if loaded_from else "unsaved"
+    if not calibration.is_complete:
+        pieces = []
+        if not calibration.has_robot:
+            pieces.append("robot:r")
+        if not calibration.has_human:
+            pieces.append("human:p")
+        loaded_text = "need " + ",".join(pieces)
+
+    distance = calibration.state.distance
+    distance_text = "n/a" if distance is None else f"{distance:.2f}"
+    lines = (
+        "pinch "
+        f"{loaded_text} enabled={calibration.enabled} active={calibration.state.active}",
+        f"pinch dist={distance_text} conf={calibration.state.confidence:.2f} "
+        "keys: r robot, p human, s save, l load, x toggle, c zero, n clear-zero",
+    )
+    for index, line in enumerate(lines):
+        y = 58 + 24 * index
+        cv2.putText(
+            bgr,
+            line,
+            (12, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            (0, 0, 0),
+            4,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            bgr,
+            line,
+            (12, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
 
 def main() -> None:
@@ -220,6 +364,47 @@ def main() -> None:
         default=DEFAULT_DEBUG_TARGETS,
         help="Print detected handedness and active joint targets while running.",
     )
+    parser.add_argument(
+        "--pinch-calibration-path",
+        default=DEFAULT_PINCH_CALIBRATION_PATH,
+        help="JSON file for thumb/index pinch calibration.",
+    )
+    parser.add_argument(
+        "--pinch-correction",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable calibrated thumb/index pinch correction.",
+    )
+    parser.add_argument(
+        "--pinch-autoload",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Load --pinch-calibration-path at startup if it exists.",
+    )
+    parser.add_argument(
+        "--pinch-activate-distance",
+        type=float,
+        default=PinchThresholds.activate_distance,
+        help="Feature-space distance below which pinch correction activates.",
+    )
+    parser.add_argument(
+        "--pinch-release-distance",
+        type=float,
+        default=PinchThresholds.release_distance,
+        help="Feature-space distance above which active pinch correction releases.",
+    )
+    parser.add_argument(
+        "--pinch-full-distance",
+        type=float,
+        default=PinchThresholds.full_confidence_distance,
+        help="Feature-space distance that maps to full pinch confidence.",
+    )
+    parser.add_argument(
+        "--pinch-smoothing-alpha",
+        type=float,
+        default=PinchThresholds.smoothing_alpha,
+        help="Low-pass alpha for pinch confidence/blending.",
+    )
     parser.set_defaults(lock_input_hand=DEFAULT_LOCK_INPUT_HAND)
     args = parser.parse_args()
     if args.finger_abad_alpha is not None:
@@ -233,6 +418,24 @@ def main() -> None:
         legacy_thumb_gains.append(args.thumb_dip_closed / -0.72)
     if legacy_thumb_gains:
         args.thumb_flexion_gain = max(0.0, sum(legacy_thumb_gains) / len(legacy_thumb_gains))
+
+    pinch_thresholds = PinchThresholds(
+        activate_distance=args.pinch_activate_distance,
+        release_distance=args.pinch_release_distance,
+        full_confidence_distance=args.pinch_full_distance,
+        smoothing_alpha=args.pinch_smoothing_alpha,
+    )
+    try:
+        pinch_thresholds.validate()
+    except ValueError as exc:
+        parser.error(str(exc))
+    pinch_calibration_path = Path(args.pinch_calibration_path).expanduser()
+    pinch_calibration = _load_pinch_calibration_if_available(
+        pinch_calibration_path,
+        thresholds=pinch_thresholds,
+        enabled=args.pinch_correction,
+        autoload=args.pinch_autoload,
+    )
 
     camera = int(args.camera) if str(args.camera).isdigit() else args.camera
     cap = cv2.VideoCapture(camera)
@@ -275,8 +478,18 @@ def main() -> None:
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             hand_frame = detector.detect_rgb(rgb)
             teleop_frame = None
+            pinch_features = None
             if hand_frame is not None:
                 teleop_frame = pipeline.process_landmark_frame(hand_frame)
+                pinch_features = extract_pinch_features(teleop_frame.landmarks)
+                corrected_retargeting = pinch_calibration.apply(
+                    teleop_frame.retargeting,
+                    pinch_features,
+                )
+                teleop_frame = replace(
+                    teleop_frame,
+                    retargeting=corrected_retargeting,
+                )
                 backend.send(teleop_frame.retargeting)
                 if args.debug_targets:
                     now = time.monotonic()
@@ -288,11 +501,15 @@ def main() -> None:
                             f"input={hand_frame.input_hand_type} "
                             f"robot={hand_frame.robot_hand_type} "
                             f"mirrored={hand_frame.mirrored}: "
-                            f"{_compact_joint_values(teleop_frame.active_joint_positions)}"
+                            f"{_compact_joint_values(teleop_frame.active_joint_positions)} "
+                            f"{_pinch_debug_text(pinch_calibration)}"
                         )
+            else:
+                pinch_calibration.update_confidence(None)
 
             if args.show:
                 detector.draw_landmarks(bgr, hand_frame)
+                _draw_pinch_overlay(bgr, pinch_calibration)
                 cv2.imshow("midas_hand_teleop", bgr)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
@@ -306,9 +523,52 @@ def main() -> None:
                             "Captured retargeter neutral offsets: "
                             f"{_compact_joint_values(offsets)}"
                         )
-                if key == ord("r"):
+                if key == ord("n"):
                     pipeline.clear_neutral_offsets()
                     print("Cleared retargeter neutral offsets.")
+                if key == ord("r"):
+                    _capture_robot_pinch(
+                        pinch_calibration,
+                        backend,
+                        teleop_frame,
+                    )
+                if key == ord("p"):
+                    _capture_human_pinch(pinch_calibration, teleop_frame)
+                if key == ord("s"):
+                    if not pinch_calibration.is_complete:
+                        print(
+                            "Pinch calibration is incomplete; press r for robot "
+                            "pinch and p for human pinch before saving."
+                        )
+                    else:
+                        save_pinch_calibration(
+                            pinch_calibration,
+                            pinch_calibration_path,
+                        )
+                        pinch_calibration.metadata["loaded_from"] = str(
+                            pinch_calibration_path
+                        )
+                        print(f"Saved pinch calibration to {pinch_calibration_path}")
+                if key == ord("l"):
+                    try:
+                        was_enabled = pinch_calibration.enabled
+                        pinch_calibration = load_pinch_calibration(
+                            pinch_calibration_path
+                        )
+                        pinch_calibration.enabled = was_enabled
+                        pinch_calibration.metadata["loaded_from"] = str(
+                            pinch_calibration_path
+                        )
+                        print(f"Loaded pinch calibration from {pinch_calibration_path}")
+                    except Exception as exc:
+                        print(
+                            f"Could not load pinch calibration from "
+                            f"{pinch_calibration_path}: {exc}"
+                        )
+                if key == ord("x"):
+                    pinch_calibration.enabled = not pinch_calibration.enabled
+                    state = "enabled" if pinch_calibration.enabled else "disabled"
+                    print(f"Pinch correction {state}.")
     except KeyboardInterrupt:
         pass
     finally:

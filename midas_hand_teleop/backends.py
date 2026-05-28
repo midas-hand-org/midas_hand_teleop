@@ -134,6 +134,7 @@ class HardwareBackend:
         self.update_rate_hz = float(update_rate_hz)
         self.interpolation_alpha = float(np.clip(interpolation_alpha, 0.0, 1.0))
         self._lock = threading.Lock()
+        self._io_lock = threading.Lock()
         self._closed = False
         self._loop_error: Exception | None = None
         self._command_thread: threading.Thread | None = None
@@ -181,6 +182,12 @@ class HardwareBackend:
             self._command_thread.join(timeout=1.0)
         self.hand.shutdown()
 
+    def read_motor_positions(self) -> np.ndarray:
+        """Return current hardware motor positions in HandConfig motor order."""
+
+        with self._io_lock:
+            return self.hand.clip_positions(self.hand.read_pos())
+
     def _prepare_target(self, result: RetargetingResult) -> np.ndarray:
         target = np.asarray(result.hardware_motor_positions, dtype=np.float64)
         target *= self.command_scale
@@ -215,7 +222,8 @@ class HardwareBackend:
         if self.max_step_rad > 0:
             delta = np.clip(delta, -self.max_step_rad, self.max_step_rad)
         command = self._last_command + delta
-        self.hand.set_positions(command, clip=True)
+        with self._io_lock:
+            self.hand.set_positions(command, clip=True)
         self._last_command = command
 
     @staticmethod
