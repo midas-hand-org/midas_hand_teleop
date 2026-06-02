@@ -38,6 +38,7 @@ def _build_backend(args):
             mujoco_repo=args.mujoco_repo,
             render=args.mujoco_viewer,
             steps_per_frame=args.mujoco_steps,
+            floating_wrist=getattr(args, "floating_wrist", False),
         )
     if args.backend == "hardware":
         return HardwareBackend(
@@ -124,6 +125,11 @@ def main() -> None:
     parser.add_argument("--mujoco-xml", default=None)
     parser.add_argument("--mujoco-viewer", action="store_true")
     parser.add_argument("--mujoco-steps", type=int, default=30)
+    parser.add_argument(
+        "--floating-wrist",
+        action="store_true",
+        help="Move palm with webcam wrist (use midas_manipulation_desk_scene.xml).",
+    )
     parser.add_argument(
         "--coupling-mode",
         choices=SUPPORTED_COUPLING_MODES,
@@ -277,7 +283,7 @@ def main() -> None:
             teleop_frame = None
             if hand_frame is not None:
                 teleop_frame = pipeline.process_landmark_frame(hand_frame)
-                backend.send(teleop_frame.retargeting)
+                backend.send(teleop_frame.retargeting, hand_frame=hand_frame)
                 if args.debug_targets:
                     now = time.monotonic()
                     if now - last_debug_print >= 0.5:

@@ -110,7 +110,7 @@ class MediaPipeHandDetector:
 
         world = self._parse_world_landmarks(results.multi_hand_world_landmarks[hand_index])
         landmarks, mirrored = self._retarget_landmarks(world, input_hand_type)
-        wrist_rotation = self._estimate_wrist_frame(world - world[0:1])
+        wrist_rotation = self._estimate_wrist_frame(landmarks)
         return HandLandmarkFrame(
             landmarks=landmarks,
             image_landmarks=results.multi_hand_landmarks[hand_index],
@@ -151,7 +151,7 @@ class MediaPipeHandDetector:
 
         world = self._parse_tasks_world_landmarks(results.hand_world_landmarks[hand_index])
         landmarks, mirrored = self._retarget_landmarks(world, input_hand_type)
-        wrist_rotation = self._estimate_wrist_frame(world - world[0:1])
+        wrist_rotation = self._estimate_wrist_frame(landmarks)
         return HandLandmarkFrame(
             landmarks=landmarks,
             image_landmarks=results.hand_landmarks[hand_index],
