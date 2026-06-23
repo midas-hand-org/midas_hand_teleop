@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
+import queue
 import time
 
 import cv2
@@ -16,6 +18,24 @@ from .detector import MediaPipeHandDetector
 from .pipeline import MidasTeleopPipeline
 
 
+def _display_worker(frame_queue, key_queue):
+    """OpenCV display loop running in a spawned subprocess.
+
+    Spawning avoids the macOS NSApplication conflict between mjpython (MuJoCo
+    viewer) and cv2.imshow, which both require the Cocoa main thread.
+    """
+    import cv2
+    while True:
+        frame = frame_queue.get()
+        if frame is None:
+            break
+        cv2.imshow("midas_hand_teleop", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key != 255:
+            key_queue.put(key)
+    cv2.destroyAllWindows()
+
+
 DEFAULT_BACKEND = "hardware"
 DEFAULT_CONFIGURE_HARDWARE = True
 DEFAULT_DEBUG_TARGETS = True
@@ -26,7 +46,7 @@ DEFAULT_HARDWARE_MAX_STEP_RAD = 0.15
 DEFAULT_HARDWARE_RATE_HZ = 50.0
 DEFAULT_HARDWARE_INTERPOLATION_ALPHA = 0.4
 DEFAULT_LOCK_INPUT_HAND = False
-DEFAULT_SHOW = True
+DEFAULT_SHOW = False
 
 
 def _build_backend(args):
@@ -267,6 +287,20 @@ def main() -> None:
     backend = _build_backend(args)
     last_debug_print = 0.0
 
+    display_proc = None
+    frame_queue = None
+    key_queue = None
+    if args.show:
+        _ctx = multiprocessing.get_context("spawn")
+        frame_queue = _ctx.Queue(maxsize=1)
+        key_queue = _ctx.Queue()
+        display_proc = _ctx.Process(
+            target=_display_worker,
+            args=(frame_queue, key_queue),
+            daemon=True,
+        )
+        display_proc.start()
+
     try:
         while True:
             ok, bgr = cap.read()
@@ -293,27 +327,42 @@ def main() -> None:
 
             if args.show:
                 detector.draw_landmarks(bgr, hand_frame)
-                cv2.imshow("midas_hand_teleop", bgr)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q"):
-                    break
-                if key == ord("c"):
-                    if teleop_frame is None:
-                        print("No hand frame available for neutral calibration.")
-                    else:
-                        offsets = pipeline.calibrate_neutral_from_last_frame()
-                        print(
-                            "Captured retargeter neutral offsets: "
-                            f"{_compact_joint_values(offsets)}"
-                        )
-                if key == ord("r"):
-                    pipeline.clear_neutral_offsets()
-                    print("Cleared retargeter neutral offsets.")
+                try:
+                    frame_queue.put_nowait(bgr.copy())
+                except queue.Full:
+                    pass
+                try:
+                    key = key_queue.get_nowait()
+                    if key == ord("q"):
+                        break
+                    if key == ord("c"):
+                        if teleop_frame is None:
+                            print("No hand frame available for neutral calibration.")
+                        else:
+                            offsets = pipeline.calibrate_neutral_from_last_frame()
+                            print(
+                                "Captured retargeter neutral offsets: "
+                                f"{_compact_joint_values(offsets)}"
+                            )
+                    if key == ord("r"):
+                        pipeline.clear_neutral_offsets()
+                        print("Cleared retargeter neutral offsets.")
+                except queue.Empty:
+                    pass
     except KeyboardInterrupt:
         pass
     finally:
         backend.close()
         pipeline.close()
         cap.release()
-        if args.show:
-            cv2.destroyAllWindows()
+        if display_proc is not None:
+            try:
+                frame_queue.put_nowait(None)
+            except Exception:
+                pass
+            display_proc.join(timeout=2.0)
+            if display_proc.is_alive():
+                display_proc.terminate()
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.analysis.extraPaths": [
+        "../midas_hand_retargeter",
+        "../midas_hand_api"
+    ]
+}
