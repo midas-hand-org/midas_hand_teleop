@@ -212,8 +212,9 @@ def main() -> None:
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
     parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--finger-abad-limit", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--finger-abad-deadzone", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--finger-abad-curl-damping", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--finger-abad-deadzone", type=float, default=DEFAULT_TUNING.finger_abad_deadzone)
+    parser.add_argument("--finger-abad-curl-damping", type=float, default=DEFAULT_TUNING.finger_abad_curl_damping)
+    parser.add_argument("--finger-abad-alpha-curled", type=float, default=DEFAULT_TUNING.finger_abad_alpha_curled)
     parser.add_argument("--thumb-cmc-roll-open", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--thumb-cmc-roll-oppose", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--thumb-cmc-roll-angle-neutral", type=float, default=None, help=argparse.SUPPRESS)
@@ -276,6 +277,9 @@ def main() -> None:
             finger_curl_gain=args.finger_curl_gain,
             finger_abad_gain=args.finger_abad_gain,
             finger_smoothing_alpha=args.finger_smoothing_alpha,
+            finger_abad_deadzone=args.finger_abad_deadzone,
+            finger_abad_curl_damping=args.finger_abad_curl_damping,
+            finger_abad_alpha_curled=args.finger_abad_alpha_curled,
             thumb_cmc_gain=args.thumb_cmc_gain,
             thumb_cmc_side_gain=args.thumb_cmc_side_gain,
             thumb_cmc_roll_gain=args.thumb_cmc_roll_gain,
