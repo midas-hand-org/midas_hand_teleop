@@ -211,9 +211,14 @@ def main() -> None:
     parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
     parser.add_argument("--thumb-alpha-curled", type=float, default=DEFAULT_TUNING.thumb_alpha_curled)
+    parser.add_argument("--thumb-cmc-side-outward-offset", type=float, default=DEFAULT_TUNING.thumb_cmc_side_outward_offset)
+    parser.add_argument("--thumb-pinch-distance", type=float, default=DEFAULT_TUNING.thumb_pinch_distance)
+    parser.add_argument("--thumb-pinch-snap-distance", type=float, default=DEFAULT_TUNING.thumb_pinch_snap_distance)
+    parser.add_argument("--thumb-pinch-opposition-cap", type=float, default=DEFAULT_TUNING.thumb_pinch_opposition_cap)
     parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--finger-abad-limit", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--finger-abad-deadzone", type=float, default=DEFAULT_TUNING.finger_abad_deadzone)
+    parser.add_argument("--finger-abad-outward-offset", type=float, default=DEFAULT_TUNING.finger_abad_outward_offset)
     parser.add_argument("--finger-abad-curl-damping", type=float, default=DEFAULT_TUNING.finger_abad_curl_damping)
     parser.add_argument("--finger-abad-alpha-curled", type=float, default=DEFAULT_TUNING.finger_abad_alpha_curled)
     parser.add_argument("--thumb-cmc-roll-open", type=float, default=None, help=argparse.SUPPRESS)
@@ -279,6 +284,8 @@ def main() -> None:
             finger_abad_gain=args.finger_abad_gain,
             finger_smoothing_alpha=args.finger_smoothing_alpha,
             finger_abad_deadzone=args.finger_abad_deadzone,
+            finger_abad_outward_offset=args.finger_abad_outward_offset,
+            thumb_cmc_side_outward_offset=args.thumb_cmc_side_outward_offset,
             finger_abad_curl_damping=args.finger_abad_curl_damping,
             finger_abad_alpha_curled=args.finger_abad_alpha_curled,
             thumb_cmc_gain=args.thumb_cmc_gain,
@@ -287,6 +294,9 @@ def main() -> None:
             thumb_flexion_gain=args.thumb_flexion_gain,
             thumb_smoothing_alpha=args.thumb_smoothing_alpha,
             thumb_alpha_curled=args.thumb_alpha_curled,
+            thumb_pinch_distance=args.thumb_pinch_distance,
+            thumb_pinch_snap_distance=args.thumb_pinch_snap_distance,
+            thumb_pinch_opposition_cap=args.thumb_pinch_opposition_cap,
         ),
     )
     pipeline = MidasTeleopPipeline(detector=detector, retargeter=retargeter)
