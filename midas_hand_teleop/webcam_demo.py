@@ -210,6 +210,7 @@ def main() -> None:
     parser.add_argument("--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain)
     parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
+    parser.add_argument("--thumb-alpha-curled", type=float, default=DEFAULT_TUNING.thumb_alpha_curled)
     parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--finger-abad-limit", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--finger-abad-deadzone", type=float, default=DEFAULT_TUNING.finger_abad_deadzone)
@@ -285,6 +286,7 @@ def main() -> None:
             thumb_cmc_roll_gain=args.thumb_cmc_roll_gain,
             thumb_flexion_gain=args.thumb_flexion_gain,
             thumb_smoothing_alpha=args.thumb_smoothing_alpha,
+            thumb_alpha_curled=args.thumb_alpha_curled,
         ),
     )
     pipeline = MidasTeleopPipeline(detector=detector, retargeter=retargeter)
