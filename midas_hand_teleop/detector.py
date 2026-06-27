@@ -9,6 +9,7 @@ from urllib.request import urlretrieve
 import numpy as np
 
 from midas_hand_retargeter.human import (
+    make_kabsch_frame_fn,
     mediapipe_world_to_mano_landmarks,
     mirror_landmarks_for_robot_hand,
 )
@@ -43,6 +44,7 @@ class MediaPipeHandDetector:
         mirror_input: bool = True,
         mirror_axis: str = "y",
         lock_input_hand: bool = True,
+        palm_frame: str = "legacy",
         min_detection_confidence: float = 0.8,
         min_tracking_confidence: float = 0.8,
         model_path: str | Path | None = None,
@@ -56,6 +58,10 @@ class MediaPipeHandDetector:
         self.mirror_input = bool(mirror_input)
         self.mirror_axis = mirror_axis
         self.lock_input_hand = bool(lock_input_hand)
+        self.palm_frame = palm_frame
+        # Kabsch frame estimation is stateful (sign-continuity holds the previous
+        # frame through edge-on views), so build one estimator per detector.
+        self._frame_fn = make_kabsch_frame_fn() if palm_frame == "kabsch" else None
         self._locked_input_hand_type: str | None = None
         if hasattr(mp, "solutions"):
             self._backend = "solutions"
@@ -224,6 +230,7 @@ class MediaPipeHandDetector:
         landmarks = mediapipe_world_to_mano_landmarks(
             world_landmarks,
             hand_type=input_hand_type,
+            frame_fn=self._frame_fn,
         )
         mirrored = self.mirror_input and input_hand_type != self.hand_type
         if mirrored:

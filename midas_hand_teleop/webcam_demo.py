@@ -125,6 +125,13 @@ def main() -> None:
         help="MANO-frame axis to mirror when mapping left input to a right robot.",
     )
     parser.add_argument(
+        "--palm-frame",
+        choices=["legacy", "kabsch"],
+        default="legacy",
+        help="Hand orientation estimator: legacy 3-point normal, or the more "
+        "rotation-stable Kabsch palm fit with sign-continuity.",
+    )
+    parser.add_argument(
         "--show",
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_SHOW,
@@ -273,6 +280,7 @@ def main() -> None:
         mirror_input=not args.no_mirror_input,
         mirror_axis=args.mirror_axis,
         lock_input_hand=args.lock_input_hand,
+        palm_frame=args.palm_frame,
         model_path=args.hand_landmarker_model,
     )
     retargeter = MidasHandRetargeter.create(
