@@ -219,6 +219,9 @@ def main() -> None:
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
     parser.add_argument("--thumb-alpha-curled", type=float, default=DEFAULT_TUNING.thumb_alpha_curled)
     parser.add_argument("--thumb-cmc-side-outward-offset", type=float, default=DEFAULT_TUNING.thumb_cmc_side_outward_offset)
+    parser.add_argument("--thumb-cmc-side-middle-offset", type=float, default=DEFAULT_TUNING.thumb_cmc_side_middle_offset)
+    parser.add_argument("--thumb-cmc-side-ring-offset", type=float, default=DEFAULT_TUNING.thumb_cmc_side_ring_offset)
+    parser.add_argument("--thumb-cmc-side-offset-alpha", type=float, default=DEFAULT_TUNING.thumb_cmc_side_offset_alpha)
     parser.add_argument("--thumb-pinch-distance", type=float, default=DEFAULT_TUNING.thumb_pinch_distance)
     parser.add_argument("--thumb-pinch-snap-distance", type=float, default=DEFAULT_TUNING.thumb_pinch_snap_distance)
     parser.add_argument("--thumb-pinch-opposition-cap", type=float, default=DEFAULT_TUNING.thumb_pinch_opposition_cap)
@@ -294,6 +297,9 @@ def main() -> None:
             finger_abad_deadzone=args.finger_abad_deadzone,
             finger_abad_outward_offset=args.finger_abad_outward_offset,
             thumb_cmc_side_outward_offset=args.thumb_cmc_side_outward_offset,
+            thumb_cmc_side_middle_offset=args.thumb_cmc_side_middle_offset,
+            thumb_cmc_side_ring_offset=args.thumb_cmc_side_ring_offset,
+            thumb_cmc_side_offset_alpha=args.thumb_cmc_side_offset_alpha,
             finger_abad_curl_damping=args.finger_abad_curl_damping,
             finger_abad_alpha_curled=args.finger_abad_alpha_curled,
             thumb_cmc_gain=args.thumb_cmc_gain,
