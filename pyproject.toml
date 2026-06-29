@@ -18,10 +18,16 @@ dependencies = [
 [project.optional-dependencies]
 mujoco = ["mujoco>=3.0"]
 hardware = ["midas-hand>=0.1.0"]
+# Manus-glove -> MuJoCo pipeline (midas-manus-teleop). Fully self-contained — no
+# dyna dependency: pyzmq for the data-center bus, protobuf for the vendored glove
+# message (built at runtime in manus_glove/glove_proto.py), mujoco for the sim.
+manus = ["pyzmq>=25", "protobuf>=4.25", "mujoco>=3.0"]
 dev = ["pytest"]
 
 [project.scripts]
 midas-hand-teleop = "midas_hand_teleop.webcam_demo:main"
+midas-manus-teleop = "midas_hand_teleop.manus_glove.manus_teleop:main"
+midas-manus-bridge = "midas_hand_teleop.manus_glove.manus_bridge:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

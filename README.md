@@ -91,3 +91,44 @@ midas-hand-teleop
 
 Override any default directly, for example `--hardware-max-step-rad 0.08`,
 `--no-debug-targets`, `--no-show`, or `--coupling-mode fixed_passive`.
+
+## Manus glove pipeline
+
+`midas_hand_teleop/manus_glove/` is the glove-driven sibling of the webcam
+pipeline: it swaps the OpenCV + MediaPipe input for a physical Manus glove, then
+reuses the same retargeting and MuJoCo backend. It is self-contained — the
+data-center ZMQ bus shim and the glove protobuf are vendored, so it needs no
+external `dyna` dependency. Install the extra deps with:
+
+```bash
+pip install -e '.[manus]'
+```
+
+The bridge runs on an x86 host with the ManusSDK shared library and the gloves;
+it reads both gloves and publishes MediaPipe-21 keypoints per side over ZMQ:
+
+```bash
+midas-manus-bridge --host <consumer-ip> --rate 120
+```
+
+The driver subscribes, retargets, and drives the MIDAS MuJoCo model (needs a
+display for the viewer; use `--headless` without one):
+
+```bash
+midas-manus-teleop --side right --mujoco-viewer --debug-targets
+```
+
+`--retarget full` (default) uses the same `MidasHandRetargeter` as the
+webcam/hardware path so tuning transfers to the real robot; `--retarget
+geometric` is the lightweight direct map.
+
+No hardware needed for a smoke test — `fake_glove_publisher` emits the same wire
+format on the same topic, so the whole subscribe → retarget → MuJoCo path runs
+with nothing plugged in:
+
+```bash
+# terminal 1 — the driver (starts the built-in data-center proxy)
+midas-manus-teleop --side right --headless --duration 10
+# terminal 2 — the synthetic glove
+python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right --rate 60
+```
