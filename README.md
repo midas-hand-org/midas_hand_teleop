@@ -1,134 +1,142 @@
 # MIDAS Hand Teleop
 
-MediaPipe webcam wrappers for producing MIDAS retargeting inputs. This repo
-does not own the optimizer, MuJoCo model, or hardware API:
+Teleoperate the MIDAS robot hand — in MuJoCo and on real hardware — from a
+Manus Haptic Pro glove or a webcam, with a browser UI for tuning each finger's
+retargeting live.
 
-- retargeting: `midas_hand_retargeter`
-- simulation: `midas_hand_mujoco`
-- hardware: `midas_hand_api`
+This repo owns the input sources, the control loops and the command sinks. It
+does not own:
 
-Install the sibling packages during development:
+| | |
+|---|---|
+| retargeting | [`midas_hand_retargeter`](https://github.com/midas-hand-org/midas_hand_retargeter) |
+| robot model | [`midas_hand_mujoco`](https://github.com/midas-hand-org/midas_hand_mujoco) |
+| hardware API | [`midas_hand_api`](https://github.com/midas-hand-org/midas_hand_api) |
+
+## Install
 
 ```bash
-pip install -e ../midas_hand_api
 pip install -e ../midas_hand_retargeter
-pip install -e .
+pip install -e ".[manus,mujoco]"        # add `hardware` for the real hand
 ```
 
-By default the console entrypoint uses the current hardware test profile:
-hardware backend, webcam display, debug target printing, `/dev/ttyUSB0`,
-350 mA current limit, 50 Hz interpolated hardware commands, no input-hand lock,
-and `pip_dip_lookup` passive coupling.
+The Manus SDK is proprietary and is **not** vendored here. The bridge binds it
+through `ctypes` and looks for `libManusSDK_Integrated.so` via `--sdk-lib`,
+`$MANUS_SDK_LIB`, `$MANUS_SDK_DIR`, the loader path, then `/usr/local/lib`.
+Everything except the live-glove path runs without it.
 
-Run the hardware teleop profile:
+## Quickstart, no hardware at all
+
+The synthetic publisher speaks the same wire format as the real bridge, so the
+whole pipeline runs with no glove, no camera and no robot:
 
 ```bash
-midas-hand-teleop
+python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &
+midas-manus-teleop --backend mujoco --mujoco-viewer
 ```
 
-Print retargeted active joint targets from a webcam instead:
+## Tuning UI
 
 ```bash
-midas-hand-teleop --backend print
+python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &   # or: midas-manus-bridge &
+midas-hand-tune --open
 ```
 
-The MIDAS MuJoCo model is currently a right hand. By default the teleop demo
-accepts either physical hand and mirrors a left-hand input into the right-hand
-robot convention. The webcam overlay shows both the raw MediaPipe handedness
-label and the corrected input hand:
+Then edit any finger's curl scale, output range, splay or smoothing and watch
+that finger change in the sim on the next frame. The page shows the glove rate
+and measured end-to-end latency, the analytic intermediates (curl, splay, thumb
+angles) behind each joint target, and commanded-vs-measured position per joint.
+Presets save to `~/.midas_hand/retarget_presets/` and carry the neutral
+calibration with them.
+
+Output-range sliders are bounded by the robot's real joint limits, and show
+what percentage of each joint's travel the profile actually commands — the
+built-in defaults reach only 75% of MCP pitch and 84% of PIP.
+
+## Glove teleop
 
 ```bash
-midas-hand-teleop --show --backend print --debug-targets
+midas-manus-bridge &                       # glove -> ZMQ
+midas-manus-teleop --backend mujoco --mujoco-viewer
 ```
 
-When `--show` is enabled, hold the human hand in the pose that should command
-MIDAS zero and press `c` to capture retargeter neutral calibration. Press `r`
-to clear it. This calibration is applied before print, MuJoCo, or hardware
-output while preserving the robot joint limits on each side of zero.
+Right hand only. `--side left` is refused rather than warned about: the
+analytic map is reflection-invariant, so mirroring the input produces
+byte-identical joint targets and does **not** give you a left hand.
 
-For an unmirrored OpenCV webcam feed, MediaPipe's raw handedness label is often
-opposite the physical hand. If you mirror the camera image before detection,
-pass `--selfie`.
-
-With newer `mediapipe` wheels, the package uses the MediaPipe Tasks API and
-caches `hand_landmarker.task` at `~/.cache/midas_hand_teleop/` on first run.
-You can also provide the model explicitly:
+## Webcam teleop
 
 ```bash
-midas-hand-teleop --hand-landmarker-model /path/to/hand_landmarker.task
+midas-hand-teleop --backend mujoco --mujoco-viewer
 ```
 
-Send commands to the MIDAS MuJoCo model:
+Keys in the camera window: `c` capture neutral calibration, `r` clear it,
+`q` quit.
+
+## Driving the real hand
+
+> The default backend is `print` in every entry point. Nothing energises a
+> motor unless you ask for `--backend hardware`.
+
+Before the first run, **home the hand** (see `midas_hand_api`) so
+`~/.midas_hand/config.yaml` exists. Without it the motor zero has no defined
+relationship to the URDF zero and the API's joint-limit clamp does nothing, so
+`--backend hardware` is refused; `--allow-unhomed` overrides that if you know
+why you want it.
 
 ```bash
-midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets
+midas-manus-teleop --backend hardware \
+    --hardware-current-limit 200 \
+    --hardware-command-scale 0.4 \
+    --start-armed
 ```
 
-Common live tuning overrides:
+Bring-up order: `--backend print` first to check the targets look sane, then
+`--backend mujoco`, then hardware with a low current limit and a reduced
+command scale. Without `--start-armed` the backend connects and configures but
+leaves torque off until armed, and the first commanded pose is always the
+measured pose, so arming cannot jump.
+
+A deadman stops commanding and disarms if no glove frame arrives for
+`--stale-timeout` seconds (0.5 by default). Without it the loop would hold a
+commanded pose against a dead publisher indefinitely.
+
+## Entry points
+
+| command | what it does |
+|---|---|
+| `midas-manus-bridge` | Manus SDK → ZMQ keypoints |
+| `midas-manus-teleop` | glove → retarget → print / MuJoCo / hardware |
+| `midas-hand-teleop` | webcam → retarget → print / MuJoCo / hardware |
+| `midas-hand-tune` | browser tuning UI |
+| `midas-hand-diag` | text diagnostics: palm basis, canonical poses, frame presets |
+
+## Architecture
+
+```
+Manus glove ──ctypes──▶ manus_bridge ──ZMQ 5710/5711──▶ subscriber
+                                                            │
+                                                    (21,3) landmarks
+                                                            ▼
+                                          midas_hand_retargeter (analytic)
+                                                            │
+                                                   13 joint targets
+                                                            ▼
+                                        PrintBackend │ MujocoBackend │ HardwareBackend
+```
+
+The bridge publishes at 120 Hz; control loops run at 60 Hz; the hardware
+backend commands on its own 50 Hz thread with slew limiting, so an irregular
+input rate never becomes an irregular command rate.
+
+## Tests
 
 ```bash
-midas-hand-teleop --backend mujoco --mujoco-viewer --show --debug-targets \
-  --no-lock-input-hand
+pytest
 ```
 
-For persistent defaults, edit `midas_hand_retargeter/tuning.py`.
-Use `--input-hand Left` or `--input-hand Right` if the MediaPipe handedness
-label flips while running. The current default allows auto input handedness to
-switch; pass `--lock-input-hand` to lock onto the first corrected physical hand
-and avoid convention switching jitter.
+Everything runs with no glove, no SDK and no hardware.
 
-Send commands to hardware after calibration. The hardware backend runs its own
-fixed-rate command loop, so vision frames update the target while motors receive
-interpolated commands at `--hardware-rate-hz`. Start with a low command scale
-and slow per-tick step, then increase after checking that the signs and limits
-are correct:
+## License
 
-Recommended tuned params are now the defaults:
-
-```bash
-midas-hand-teleop
-```
-
-Override any default directly, for example `--hardware-max-step-rad 0.08`,
-`--no-debug-targets`, `--no-show`, or `--coupling-mode fixed_passive`.
-
-## Manus glove pipeline
-
-`midas_hand_teleop/manus_glove/` is the glove-driven sibling of the webcam
-pipeline: it swaps the OpenCV + MediaPipe input for a physical Manus glove, then
-reuses the same retargeting and MuJoCo backend. It is self-contained — the
-data-center ZMQ bus shim and the glove protobuf are vendored, so it needs no
-external `dyna` dependency. Install the extra deps with:
-
-```bash
-pip install -e '.[manus]'
-```
-
-The bridge runs on an x86 host with the ManusSDK shared library and the gloves;
-it reads both gloves and publishes MediaPipe-21 keypoints per side over ZMQ:
-
-```bash
-midas-manus-bridge --host <consumer-ip> --rate 120
-```
-
-The driver subscribes, retargets, and drives the MIDAS MuJoCo model (needs a
-display for the viewer; use `--headless` without one):
-
-```bash
-midas-manus-teleop --side right --mujoco-viewer --debug-targets
-```
-
-`--retarget full` (default) uses the same `MidasHandRetargeter` as the
-webcam/hardware path so tuning transfers to the real robot; `--retarget
-geometric` is the lightweight direct map.
-
-No hardware needed for a smoke test — `fake_glove_publisher` emits the same wire
-format on the same topic, so the whole subscribe → retarget → MuJoCo path runs
-with nothing plugged in:
-
-```bash
-# terminal 1 — the driver (starts the built-in data-center proxy)
-midas-manus-teleop --side right --headless --duration 10
-# terminal 2 — the synthetic glove
-python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right --rate 60
-```
+MIT. See `LICENSE`.
