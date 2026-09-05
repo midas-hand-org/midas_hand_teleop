@@ -68,8 +68,21 @@ class GloveSubscriber:
 
     def poll_latest(self, timeout_ms: int = 0) -> np.ndarray | None:
         """Drain the buffer; return the most recent message's structured array, or None."""
+        array, _ = self.poll_latest_with_metadata(timeout_ms)
+        return array
+
+    def poll_latest_with_metadata(
+        self, timeout_ms: int = 0
+    ) -> tuple[np.ndarray | None, dict]:
+        """Like :meth:`poll_latest`, but also return the user-metadata frame.
+
+        Frame 2 of the wire format carries the publisher's monotonic stamp, so
+        this is what makes an end-to-end latency measurement possible. Returns
+        ``(None, {})`` when nothing is waiting.
+        """
+
         if not dict(self._poller.poll(timeout_ms)):
-            return None
+            return None, {}
         latest = None
         while True:
             try:
@@ -77,11 +90,15 @@ class GloveSubscriber:
             except zmq.Again:
                 break
         if latest is None or len(latest) < 4:
-            return None
+            return None, {}
         sysmeta = json.loads(latest[1])
+        try:
+            usermeta = json.loads(latest[2]) or {}
+        except (ValueError, TypeError):
+            usermeta = {}
         dtype = _dtype_from_descr(sysmeta["dtype"])
         shape = tuple(sysmeta["shape"])
-        return np.frombuffer(latest[3], dtype=dtype).reshape(shape)
+        return np.frombuffer(latest[3], dtype=dtype).reshape(shape), usermeta
 
     def close(self) -> None:
         self._sock.close(linger=0)

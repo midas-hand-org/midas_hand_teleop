@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDAS Retarget Tuner</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+  <h1>MIDAS Retarget Tuner</h1>
+  <div class="status" id="status">
+    <span class="chip" id="chip-glove">glove &mdash;</span>
+    <span class="chip" id="chip-latency">latency &mdash;</span>
+    <span class="chip" id="chip-loop">loop &mdash;</span>
+    <span class="chip" id="chip-mode">mode &mdash;</span>
+    <span class="chip" id="chip-backend">backend &mdash;</span>
+  </div>
+  <div class="arm">
+    <button id="arm-button" class="danger" disabled>Arm hardware</button>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <section class="panel controls">
+    <nav class="tabs" id="tabs"></nav>
+    <div class="toolbar">
+      <label class="toggle"><input type="checkbox" id="show-advanced"> advanced</label>
+      <span class="spacer"></span>
+      <button id="undo" title="Undo last parameter change">Undo</button>
+      <button id="redo" title="Redo">Redo</button>
+      <button id="reset" title="Back to built-in defaults">Reset</button>
+    </div>
+    <div id="controls"></div>
+  </section>
+
+  <section class="panel readout">
+    <h2>Live</h2>
+    <p class="hint" id="provenance"></p>
+    <div id="joints"></div>
+
+    <h2>Intermediates</h2>
+    <p class="hint">What the analytic map computed before it hit the joint ranges.</p>
+    <div id="intermediates"></div>
+
+    <h2>Calibration</h2>
+    <p class="hint">
+      Hold the pose that should command MIDAS zero, then capture. Stored with the
+      preset, so a session can actually be saved.
+    </p>
+    <div class="row">
+      <button id="cal-capture">Capture neutral</button>
+      <button id="cal-clear">Clear</button>
+    </div>
+
+    <h2>Presets</h2>
+    <div class="row">
+      <select id="preset-list"><option value="">&mdash;</option></select>
+      <button id="preset-load">Load</button>
+    </div>
+    <div class="row">
+      <input id="preset-name" type="text" placeholder="preset name" spellcheck="false">
+      <button id="preset-save">Save</button>
+    </div>
+    <ul class="log" id="log"></ul>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

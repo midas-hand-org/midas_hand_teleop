@@ -1,0 +1,167 @@
+"""The tuner's HTTP surface, exercised against a real server on a real socket.
+
+These run with no glove, no sim and no hardware: the server only ever talks to
+TunerState, which is the property that makes the tuner CI-able.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+import pytest
+
+from midas_hand_retargeter.params import RetargetProfile
+from midas_hand_retargeter.store import ProfileStore
+from midas_hand_teleop.tuner.schema import build_schema
+from midas_hand_teleop.tuner.server import make_server
+from midas_hand_teleop.tuner.state import TunerState
+
+
+@pytest.fixture()
+def server(tmp_path):
+    import threading
+
+    state = TunerState(store=ProfileStore(RetargetProfile()))
+    httpd = make_server(state, port=0, preset_dir=tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    host, port = httpd.server_address
+    try:
+        yield state, f"http://{host}:{port}"
+    finally:
+        httpd.shutting_down = True
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def get(base, path):
+    with urllib.request.urlopen(f"{base}{path}", timeout=5) as response:
+        return json.loads(response.read())
+
+
+def post(base, path, payload):
+    request = urllib.request.Request(
+        f"{base}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read())
+
+
+def test_schema_describes_four_digits_and_no_pinky():
+    schema = build_schema()
+    names = [section["name"] for section in schema["sections"]]
+    assert names == ["thumb", "index", "middle", "ring"]
+    assert "pinky" not in json.dumps(schema)
+
+
+def test_range_controls_are_bounded_by_real_joint_limits():
+    schema = build_schema()
+    controls = {
+        control["path"]: control
+        for section in schema["sections"]
+        for control in section["controls"]
+    }
+    pitch = controls["index.mcp_pitch_range"]
+    assert (pitch["min"], pitch["max"]) == (-1.8, 0.0)
+    assert controls["index.pip_range"]["max"] == 0.0
+    assert controls["index.pip_range"]["min"] == -1.45
+
+
+def test_static_assets_are_served_by_allowlist(server):
+    _, base = server
+    with urllib.request.urlopen(f"{base}/", timeout=5) as response:
+        assert b"MIDAS Retarget Tuner" in response.read()
+    for name in ("app.js", "style.css"):
+        with urllib.request.urlopen(f"{base}/static/{name}", timeout=5) as response:
+            assert response.status == 200
+
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(f"{base}/static/passwd", timeout=5)
+    assert excinfo.value.code == 404
+
+
+def test_parameter_edit_applies_and_is_readable(server):
+    state, base = server
+    post(base, "/api/profile", {"updates": {"index.curl_gain": 1.75}})
+    assert state.profile.index.curl_gain == 1.75
+    assert get(base, "/api/profile")["parameters"]["index.curl_gain"] == 1.75
+    # ...and only that finger moved.
+    assert state.profile.middle.curl_gain == 1.0
+
+
+def test_rejected_edit_is_a_400_and_leaves_the_profile_untouched(server):
+    state, base = server
+    post(base, "/api/profile", {"updates": {"index.curl_gain": 1.5}})
+
+    for bad in ({"pinky.curl_gain": 1.0}, {"index.curl_scale": 1.0}, {"nodot": 1.0}):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            post(base, "/api/profile", {"updates": bad})
+        assert excinfo.value.code == 400
+        body = json.loads(excinfo.value.read())
+        assert not body["error"].startswith("'"), "KeyError repr leaked to the UI"
+
+    assert state.profile.index.curl_gain == 1.5
+
+
+def test_undo_redo_reset(server):
+    state, base = server
+    post(base, "/api/profile", {"updates": {"ring.splay_gain": 3.0}})
+    assert post(base, "/api/profile/undo", {})["parameters"]["ring.splay_gain"] == 1.2
+    assert post(base, "/api/profile/redo", {})["parameters"]["ring.splay_gain"] == 3.0
+    assert post(base, "/api/profile/reset", {})["parameters"]["ring.splay_gain"] == 1.2
+
+
+def test_presets_round_trip_over_http(server, tmp_path):
+    state, base = server
+    post(base, "/api/profile", {"updates": {"thumb.cmc_roll_gain": 0.9}})
+    post(base, "/api/presets/save", {"name": "unit", "neutral_offsets": {}})
+    assert (tmp_path / "unit.json").exists()
+    assert "unit" in get(base, "/api/presets")["presets"]
+
+    post(base, "/api/profile/reset", {})
+    payload = post(base, "/api/presets/load", {"name": "unit"})
+    assert payload["parameters"]["thumb.cmc_roll_gain"] == 0.9
+
+
+def test_preset_names_cannot_escape_the_preset_directory(server):
+    _, base = server
+    for name in ("../evil", "a/b", ".hidden"):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            post(base, "/api/presets/save", {"name": name})
+        assert excinfo.value.code == 400
+
+
+def test_arming_is_refused_without_hardware(server):
+    state, base = server
+    assert state.loop.hardware_available is False
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        post(base, "/api/arm", {"armed": True})
+    assert excinfo.value.code == 400
+    assert state.loop.armed is False
+
+
+def test_calibration_is_queued_for_the_control_thread(server):
+    state, base = server
+    post(base, "/api/calibrate", {"action": "capture"})
+    assert state.take_calibration_request() == "capture"
+    assert state.take_calibration_request() is None
+
+    with pytest.raises(urllib.error.HTTPError):
+        post(base, "/api/calibrate", {"action": "explode"})
+
+
+def test_telemetry_reports_staleness_rather_than_lying(server):
+    state, base = server
+    state.glove.connected = True
+    state.glove.latency_ms = 12.0
+    state.glove.age_s = 3.0  # publisher died three seconds ago
+    state.publish(commanded={}, measured={}, intermediates={})
+
+    glove = get(base, "/api/telemetry")["glove"]
+    assert glove["stale"] is True
+    assert glove["latency_ms"] == 12.0, "the number is kept, but flagged stale"

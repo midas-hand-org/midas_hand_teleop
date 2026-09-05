@@ -1,0 +1,153 @@
+"""Describe the tuning parameters so the UI can build itself.
+
+The form is generated from the dataclass fields rather than hand-written in
+JavaScript, so adding a parameter cannot leave the UI silently out of date —
+which is exactly how ~20 dead CLI flags accumulated in webcam_demo.
+
+Slider tracks for the ``*_range`` fields come from the robot's own joint
+limits, so the UI physically cannot present a value the hand cannot reach, and
+the unreachable part of the historical default is visible as unused track.
+"""
+
+from __future__ import annotations
+
+from dataclasses import fields as dataclass_fields
+
+from midas_hand_retargeter.model import MIDAS_RIGHT_HAND, HandModel
+from midas_hand_retargeter.params import FingerParams, RetargetProfile, ThumbParams
+
+#: UI slider bounds for scalar knobs that are not joint ranges.
+#: (minimum, maximum, step). Chosen to bracket useful tuning, not to be limits.
+SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
+    "curl_gain": (0.1, 3.0, 0.01),
+    "curl_max_bend": (0.3, 3.0, 0.01),
+    "curl_pip_weight": (0.0, 1.0, 0.01),
+    "splay_gain": (0.0, 4.0, 0.01),
+    "splay_deadzone": (0.0, 0.4, 0.005),
+    "splay_limit": (0.0, 0.79, 0.005),
+    "splay_curl_damping": (0.0, 1.0, 0.01),
+    "smoothing_alpha": (0.02, 1.0, 0.01),
+    "flexion_gain": (0.1, 3.0, 0.01),
+    "mcp_max_bend": (0.3, 3.0, 0.01),
+    "dip_max_bend": (0.3, 3.0, 0.01),
+    "dip_follows_mcp": (0.0, 1.0, 0.01),
+    "cmc_side_gain": (0.0, 4.0, 0.01),
+    "cmc_side_neutral_angle": (-1.2, 1.2, 0.01),
+    "cmc_side_deadzone": (0.0, 0.4, 0.005),
+    "cmc_side_open": (-0.785, 0.9, 0.005),
+    "cmc_roll_gain": (0.0, 3.0, 0.01),
+    "cmc_roll_span": (0.05, 1.5, 0.01),
+    "cmc_roll_deadzone": (0.0, 0.4, 0.005),
+}
+
+#: Which joint's limits bound each ``*_range`` field. ``{finger}`` is filled in.
+RANGE_JOINTS: dict[str, str] = {
+    "mcp_pitch_range": "{finger}_mcp_pitch_joint",
+    "pip_range": "{finger}_pip_joint",
+    "mcp_range": "thumb_mcp_joint",
+    "dip_range": "thumb_dip_joint",
+    "cmc_side_range": "thumb_cmc_side_joint",
+    "cmc_roll_range": "thumb_cmc_roll_joint",
+}
+
+#: Fields shown before the "advanced" fold, in this order.
+BASIC_FIELDS = {
+    "curl_gain",
+    "curl_max_bend",
+    "mcp_pitch_range",
+    "pip_range",
+    "splay_gain",
+    "smoothing_alpha",
+    "enabled",
+    "flexion_gain",
+    "mcp_range",
+    "dip_range",
+    "cmc_side_gain",
+    "cmc_roll_gain",
+}
+
+#: Short help shown under each control.
+HELP: dict[str, str] = {
+    "curl_gain": "Multiplies measured bend. Raise if the finger closes too late.",
+    "curl_max_bend": "Human bend (rad) meaning fully closed. Raise if the finger "
+    "saturates before your hand is actually shut.",
+    "curl_pip_weight": "Share of the blend taken from the PIP bend; the rest "
+    "comes from the DIP bend.",
+    "mcp_pitch_range": "Commanded open/closed angles. Widening reclaims travel "
+    "the historical default never reached.",
+    "pip_range": "Commanded open/closed angles for the PIP joint.",
+    "splay_gain": "Multiplies sideways finger spread.",
+    "splay_deadzone": "Lateral angle ignored around neutral, to reject jitter.",
+    "splay_limit": "Hard clamp on the abduction command.",
+    "splay_curl_damping": "How much a closed finger suppresses splay; splay "
+    "tracking gets unreliable as the finger curls.",
+    "smoothing_alpha": "1.0 = instant, smaller = smoother but laggier.",
+    "enabled": "Off freezes this digit at its last command (it does not open).",
+    "flexion_gain": "Multiplies thumb MCP/DIP bend.",
+    "mcp_max_bend": "Thumb bend (rad) meaning fully flexed at the MCP.",
+    "dip_max_bend": "Thumb bend (rad) meaning fully flexed at the tip.",
+    "mcp_range": "Commanded thumb MCP open/closed angles.",
+    "dip_range": "Commanded thumb tip open/closed angles.",
+    "dip_follows_mcp": "Floor tying tip curl to MCP curl, for when the IP bend "
+    "is poorly seen.",
+    "cmc_side_gain": "Multiplies the thumb's in-plane side sweep.",
+    "cmc_side_range": "Commanded limits for thumb side sweep.",
+    "cmc_side_neutral_angle": "Measured angle treated as the thumb's rest pose.",
+    "cmc_side_deadzone": "Side angle ignored around neutral.",
+    "cmc_side_open": "Commanded value at the neutral angle.",
+    "cmc_roll_gain": "Multiplies thumb opposition (rolling across the palm).",
+    "cmc_roll_range": "Commanded limits for thumb opposition.",
+    "cmc_roll_span": "Out-of-plane angle spanning neutral to full opposition.",
+    "cmc_roll_deadzone": "Opposition angle ignored around neutral.",
+}
+
+SECTIONS = ("thumb", "index", "middle", "ring")
+
+
+def _describe_field(section: str, field, model: HandModel) -> dict:
+    name = field.name
+    entry: dict = {
+        "name": name,
+        "path": f"{section}.{name}",
+        "label": name.replace("_", " "),
+        "help": HELP.get(name, ""),
+        "advanced": name not in BASIC_FIELDS,
+    }
+    if field.type == "bool" or isinstance(field.default, bool):
+        entry["kind"] = "bool"
+        return entry
+    if name in RANGE_JOINTS:
+        joint = RANGE_JOINTS[name].format(finger=section)
+        lower, upper = model.limits(joint)
+        entry.update(kind="range", joint=joint, min=lower, max=upper, step=0.005)
+        return entry
+    low, high, step = SCALAR_BOUNDS.get(name, (0.0, 2.0, 0.01))
+    entry.update(kind="scalar", min=low, max=high, step=step)
+    return entry
+
+
+def build_schema(model: HandModel = MIDAS_RIGHT_HAND) -> dict:
+    """Full UI description: sections, controls, defaults and joint limits."""
+
+    defaults = RetargetProfile()
+    sections = []
+    for section in SECTIONS:
+        params_cls = ThumbParams if section == "thumb" else FingerParams
+        controls = [
+            _describe_field(section, field, model)
+            for field in dataclass_fields(params_cls)
+        ]
+        sections.append(
+            {"name": section, "label": section.capitalize(), "controls": controls}
+        )
+
+    return {
+        "sections": sections,
+        "defaults": defaults.to_flat_dict(),
+        "joints": [
+            {"name": name, "lower": float(low), "upper": float(high)}
+            for name, (low, high) in (
+                (n, model.limits(n)) for n in model.joint_names
+            )
+        ],
+    }

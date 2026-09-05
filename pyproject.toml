@@ -22,6 +22,9 @@ hardware = ["midas-hand>=0.1.0"]
 # dyna dependency: pyzmq for the data-center bus, protobuf for the vendored glove
 # message (built at runtime in manus_glove/glove_proto.py), mujoco for the sim.
 manus = ["pyzmq>=25", "protobuf>=4.25", "mujoco>=3.0"]
+# The browser tuner adds no WEB dependencies (stdlib http.server, vanilla JS),
+# but it does need the glove bus and the sim it drives.
+tuner = ["pyzmq>=25", "protobuf>=4.25", "mujoco>=3.0"]
 dev = ["pytest"]
 
 [project.scripts]
@@ -29,10 +32,14 @@ midas-hand-teleop = "midas_hand_teleop.webcam_demo:main"
 midas-manus-teleop = "midas_hand_teleop.manus_glove.manus_teleop:main"
 midas-manus-bridge = "midas_hand_teleop.manus_glove.manus_bridge:main"
 midas-hand-diag = "midas_hand_teleop.diagnostics:main"
+midas-hand-tune = "midas_hand_teleop.tuner.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["midas_hand_teleop*"]
+
+[tool.setuptools.package-data]
+"midas_hand_teleop.tuner" = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -10,6 +10,7 @@ from typing import Protocol
 
 import numpy as np
 
+from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
 from midas_hand_retargeter.paths import default_mjcf_path
 from midas_hand_retargeter.retargeter import RetargetingResult
 
@@ -17,6 +18,16 @@ from midas_hand_retargeter.retargeter import RetargetingResult
 class TeleopBackend(Protocol):
     def send(self, result: RetargetingResult) -> None:
         ...
+
+    def measured(self) -> dict[str, float]:
+        """Latest measured joint positions, keyed by JOINT NAME.
+
+        Keyed by name rather than index on purpose: the hardware reports 13
+        values in HARDWARE_MOTOR_JOINT_NAMES order (thumb first) while the
+        retargeter emits ACTIVE_JOINT_NAMES order (index first), so an
+        index-keyed comparison would silently pair up the wrong joints.
+        Returns an empty dict when the backend cannot measure anything.
+        """
 
     def close(self) -> None:
         ...
@@ -28,6 +39,9 @@ class PrintBackend:
 
     def __post_init__(self) -> None:
         self._last_print = 0.0
+
+    def measured(self) -> dict[str, float]:
+        return {}
 
     def send(self, result: RetargetingResult) -> None:
         now = time.monotonic()
@@ -83,6 +97,21 @@ class MujocoBackend:
         if self.viewer is not None:
             self.viewer.sync()
 
+    def measured(self) -> dict[str, float]:
+        """Actual simulated joint angles, so the UI can show command vs reality."""
+
+        measured: dict[str, float] = {}
+        for joint_name in self._actuator_id:
+            joint_id = self._mujoco.mj_name2id(
+                self.model, self._mujoco.mjtObj.mjOBJ_JOINT, joint_name
+            )
+            if joint_id < 0:
+                continue
+            measured[joint_name] = float(
+                self.data.qpos[self.model.jnt_qposadr[joint_id]]
+            )
+        return measured
+
     def close(self) -> None:
         if self.viewer is not None:
             self.viewer.close()
@@ -137,6 +166,10 @@ class HardwareBackend:
         self._closed = False
         self._loop_error: Exception | None = None
         self._command_thread: threading.Thread | None = None
+        self._measured: dict[str, float] = {}
+        self._measured_current_ma: dict[str, float] = {}
+        self._measured_seq = 0
+        self._measured_monotonic = 0.0
         config = self._load_config(HandConfig, DEFAULT_CONFIG_PATH, config_path)
         updates = {}
         if port is not None:
@@ -174,6 +207,51 @@ class HardwareBackend:
         with self._lock:
             self._target_command = target
 
+    def measured(self) -> dict[str, float]:
+        """Snapshot of the last positions read by the command thread.
+
+        Deliberately does NOT touch the serial bus: the command thread already
+        owns it at update_rate_hz, and a second reader from the control loop
+        would contend on a DynamixelClient with no documented thread safety.
+        """
+
+        with self._lock:
+            return dict(self._measured)
+
+    def measured_current_ma(self) -> dict[str, float]:
+        with self._lock:
+            return dict(self._measured_current_ma)
+
+    def measurement_age_s(self) -> float:
+        """Seconds since the last successful read, or inf if never read.
+
+        DynamixelClient returns cached last-good values when a packet drops, so
+        a frozen read is indistinguishable from a stationary hand. Anything
+        that trips on measured current must treat a stale sample as a fault and
+        fail closed, not simply never fire.
+        """
+
+        with self._lock:
+            if self._measured_seq == 0:
+                return float("inf")
+            return time.monotonic() - self._measured_monotonic
+
+    def _sample_state(self) -> None:
+        try:
+            positions, currents = self.hand.read_pos(), self.hand.read_cur()
+        except Exception:
+            return  # keep the previous snapshot; staleness is reported by age
+        names = HARDWARE_MOTOR_JOINT_NAMES
+        with self._lock:
+            self._measured = {
+                name: float(value) for name, value in zip(names, positions)
+            }
+            self._measured_current_ma = {
+                name: float(value) for name, value in zip(names, currents)
+            }
+            self._measured_seq += 1
+            self._measured_monotonic = time.monotonic()
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
@@ -196,6 +274,7 @@ class HardwareBackend:
                 target = self._target_command.copy()
             try:
                 self._send_interpolated_command(target)
+                self._sample_state()
             except Exception as exc:
                 self._loop_error = exc
                 print(f"Hardware command loop stopped: {exc}")

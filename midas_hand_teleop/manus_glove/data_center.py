@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import numpy as np
 import zmq
@@ -80,12 +81,23 @@ class MessageSender:
         self._ctx.destroy(linger=0)
 
 
-def send_proto_as_sized_array(message_sender: MessageSender, topic: str, proto_message) -> None:
+def send_proto_as_sized_array(
+    message_sender: MessageSender,
+    topic: str,
+    proto_message,
+    user_metadata: dict | None = None,
+) -> None:
     """Publish a protobuf message in the ``(size, payload)`` sized-array format.
 
     Mirrors ``robot_controller.motion_controller_utils.send_proto_as_sized_array``
     — the format motion-control / glove topics use so subscribers can decode with
     a fixed ``[("size","u4"), ("payload","u1",(N,))]`` dtype.
+
+    ``user_metadata`` is frame 2 of the wire format and is free-form; when it is
+    omitted a monotonic publish stamp is added so consumers can measure
+    end-to-end latency. This deliberately does NOT touch the protobuf: the
+    upstream schema is not vendored here, so inventing field numbers there could
+    break compatibility, whereas every existing consumer already ignores frame 2.
     """
     proto_bytes = proto_message.SerializeToString()
     size = len(proto_bytes)
@@ -93,7 +105,11 @@ def send_proto_as_sized_array(message_sender: MessageSender, topic: str, proto_m
     array = np.empty(1, dtype=dtype)
     array["size"][0] = size
     array["payload"][0] = np.frombuffer(proto_bytes, dtype="u1")
-    message_sender.send_array(topic=topic, user_metadata={}, array=array)
+    metadata = dict(user_metadata or {})
+    # Monotonic, not wall clock: an NTP step or a suspend must not make a fresh
+    # frame look ancient (or a dead one look fresh).
+    metadata.setdefault("t_mono_pub", time.monotonic())
+    message_sender.send_array(topic=topic, user_metadata=metadata, array=array)
 
 
 def start_data_center_proxy() -> bool:
