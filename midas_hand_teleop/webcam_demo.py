@@ -11,12 +11,13 @@ from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.adaptor import PIP_DIP_LOOKUP_MODE, SUPPORTED_COUPLING_MODES
 from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
 
-from .backends import HardwareBackend, MujocoBackend, PrintBackend
+from .backend_cli import build_backend
 from .detector import MediaPipeHandDetector
 from .pipeline import MidasTeleopPipeline
 
 
-DEFAULT_BACKEND = "hardware"
+# print, not hardware: a bare `midas-hand-teleop` must not energise motors.
+DEFAULT_BACKEND = "print"
 DEFAULT_CONFIGURE_HARDWARE = True
 DEFAULT_DEBUG_TARGETS = True
 DEFAULT_HARDWARE_PORT = "/dev/ttyUSB0"
@@ -30,28 +31,14 @@ DEFAULT_SHOW = True
 
 
 def _build_backend(args):
-    if args.backend == "print":
-        return PrintBackend()
-    if args.backend == "mujoco":
-        return MujocoBackend(
-            xml_path=args.mujoco_xml,
-            mujoco_repo=args.mujoco_repo,
-            render=args.mujoco_viewer,
-            steps_per_frame=args.mujoco_steps,
-        )
-    if args.backend == "hardware":
-        return HardwareBackend(
-            configure=args.configure_hardware,
-            config_path=args.hardware_config,
-            port=args.hardware_port,
-            baudrate=args.hardware_baudrate,
-            current_limit_ma=args.hardware_current_limit,
-            command_scale=args.hardware_command_scale,
-            max_step_rad=args.hardware_max_step_rad,
-            update_rate_hz=args.hardware_rate_hz,
-            interpolation_alpha=args.hardware_interpolation_alpha,
-        )
-    raise ValueError(f"Unsupported backend: {args.backend}")
+    """Delegate to the shared builder so both entry points share one policy.
+
+    In particular the hardware precondition check (refuse an unhomed hand) and
+    the arming semantics live in one place rather than being reimplemented per
+    CLI, which is how the two paths drifted apart in the first place.
+    """
+
+    return build_backend(args)
 
 
 def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
@@ -190,30 +177,10 @@ def main() -> None:
     parser.add_argument("--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain)
     parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
-    parser.add_argument("--finger-abad-alpha", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--finger-abad-limit", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--finger-abad-deadzone", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--finger-abad-curl-damping", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-open", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-oppose", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-angle-neutral", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-angle-span", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-angle-deadzone", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-sign", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-roll-signed", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-curl-opposition-gain", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-open", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-min", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-max", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-angle-neutral", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-angle-gain", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-deadzone", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-sign", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-alpha", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-mcp-closed", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-dip-closed", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-cmc-side-oppose", type=float, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--thumb-pinch-gain", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--finger-abad-alpha", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
+    parser.add_argument("--thumb-cmc-alpha", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
+    parser.add_argument("--thumb-mcp-closed", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
+    parser.add_argument("--thumb-dip-closed", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
     parser.add_argument(
         "--debug-targets",
         action=argparse.BooleanOptionalAction,

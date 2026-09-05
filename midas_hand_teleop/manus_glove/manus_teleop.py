@@ -74,7 +74,11 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from midas_hand_retargeter import MidasHandRetargeter
-from midas_hand_retargeter.constants import ACTIVE_JOINT_NAMES
+from midas_hand_retargeter.config import ANALYTIC_MODE, VECTOR_MODE
+from midas_hand_retargeter.constants import (
+    ACTIVE_JOINT_NAMES,
+    HARDWARE_MOTOR_JOINT_NAMES,
+)
 from midas_hand_retargeter.human import mediapipe_world_to_mano_landmarks
 from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
@@ -84,6 +88,11 @@ from midas_hand_retargeter.tuning import (
     PROFILES,
     RetargeterTuning,
     tuning_for_source,
+)
+from midas_hand_teleop.backend_cli import (
+    add_backend_arguments,
+    build_backend,
+    check_hardware_preconditions,
 )
 from midas_hand_teleop.backends import MujocoBackend
 from midas_hand_teleop.manus_glove.glove_subscriber import (
@@ -101,11 +110,23 @@ logger = logging.getLogger("manus_teleop")
 class _Control:
     """Minimal duck-typed stand-in for ``RetargetingResult``.
 
-    ``MujocoBackend.send`` only reads ``active_joint_positions`` (a
-    name -> radians dict), so this is all the geometric map needs to produce.
+    ``MujocoBackend.send`` reads ``active_joint_positions`` (name -> radians),
+    but ``HardwareBackend`` reads ``hardware_motor_positions`` — a 13-vector in
+    motor order, which is thumb-first and therefore NOT the same ordering. The
+    geometric path used to provide only the former, so any hardware send from
+    it raised AttributeError.
     """
 
     active_joint_positions: dict[str, float]
+
+    @property
+    def hardware_motor_positions(self) -> np.ndarray:
+        """Active targets in HARDWARE_MOTOR_JOINT_NAMES (motor) order."""
+
+        return np.asarray(
+            [self.active_joint_positions[name] for name in HARDWARE_MOTOR_JOINT_NAMES],
+            dtype=np.float64,
+        )
 
 
 def landmarks_to_joint_targets(
@@ -219,12 +240,25 @@ def build_retargeter(
         if args.calibrate_delay > 0:
             logger.warning("--calibrate-delay needs --retarget full; ignoring it.")
         return None
+
+    # Turning the analytic layer off has always meant "let the optimizer drive",
+    # which is now a named mode. Translate rather than fail: under the analytic
+    # default those joints would simply go unwritten.
+    mode = ANALYTIC_MODE
+    if not (args.finger_postprocess and args.thumb_postprocess):
+        mode = VECTOR_MODE
+        logger.warning(
+            "--no-finger-postprocess/--no-thumb-postprocess selects the vector "
+            "optimizer (mode=%s). It needs the [vector] extra, is ~6x slower, "
+            "and is not what drives the hand by default.",
+            VECTOR_MODE,
+        )
+
     return MidasHandRetargeter.create(
+        mode=mode,
         mujoco_repo=args.mujoco_repo,
         scaling_factor=args.scaling_factor,
         coupling_mode=args.coupling_mode,
-        finger_postprocess=args.finger_postprocess,
-        thumb_postprocess=args.thumb_postprocess,
         tuning=tuning,
     )
 
@@ -246,40 +280,57 @@ def run(args: argparse.Namespace) -> None:
     )
 
     if args.side != "right":
-        logger.warning(
-            "MIDAS MJCF is a RIGHT hand; mapping is tuned for the right "
-            "hand. Driving from the left glove will mirror splay/thumb — left-hand "
-            "mirroring is a follow-up."
+        # Not a warning: left-hand support genuinely does not exist. The
+        # analytic map is reflection-invariant, so mirroring the landmarks
+        # changes nothing (verified: max|delta| = 0.0 across all 13 targets).
+        # Real support needs a sign-aware splay and a signed thumb opposition,
+        # or a left-handed robot model.
+        raise SystemExit(
+            "Left-hand teleop is not implemented. The MIDAS model is a right "
+            "hand, and mirroring the input does NOT fix this: the analytic map "
+            "is reflection-invariant, so a mirrored frame produces byte-identical "
+            "joint targets. Use --side right."
         )
 
     # Relay so the bridge (PUB->5710) reaches our subscriber (SUB<-5711). Returns
     # False if the ports are already bound (real data center or a stale process).
     proxy_started = start_data_center_proxy() if not args.no_proxy else False
 
-    # --- MuJoCo backend (loads the MIDAS MJCF, maps joints->actuators, viewer) ---
-    backend = MujocoBackend(
-        xml_path=args.xml_path,
-        mujoco_repo=args.mujoco_repo,
-        render=args.mujoco_viewer,
-        steps_per_frame=1,  # overridden below to match real time
-    )
-    timestep = float(backend.model.opt.timestep)
+    # --- backend: print, MuJoCo, or the real hand -----------------------------
     period = 1.0 / max(args.control_hz, 1e-6)
-    # Step the sim by ~one control period per send so it runs near real time,
-    # regardless of control rate (mirrors the webcam path's frame-paced stepping).
-    steps = args.steps_per_frame or max(1, round(period / timestep))
-    backend.steps_per_frame = steps
-    if not args.gravity:
-        backend.model.opt.gravity[:] = 0.0
-    logger.info(
-        "MIDAS MuJoCo loaded (nq=%d, nu=%d), control=%.0f Hz, steps/frame=%d, "
-        "gravity=%s",
-        backend.model.nq,
-        backend.model.nu,
-        args.control_hz,
-        steps,
-        args.gravity,
-    )
+    check_hardware_preconditions(args)
+    if args.backend == "hardware":
+        backend = build_backend(args, control_hz=args.control_hz)
+        logger.info(
+            "HARDWARE backend on %s. Torque is %s; current cap %d mA, slew %.3f "
+            "rad/tick at %.0f Hz.",
+            args.hardware_port,
+            "ENABLED" if args.start_armed else "OFF until armed",
+            args.hardware_current_limit,
+            args.hardware_max_step_rad,
+            args.hardware_rate_hz,
+        )
+    elif args.backend == "print":
+        backend = build_backend(args, control_hz=args.control_hz)
+    else:
+        backend = MujocoBackend(
+            xml_path=args.xml_path,
+            mujoco_repo=args.mujoco_repo,
+            render=args.mujoco_viewer,
+            steps_per_frame=1,  # overridden below to match real time
+        )
+        timestep = float(backend.model.opt.timestep)
+        # Step the sim by ~one control period per send so it runs near real
+        # time, regardless of control rate.
+        backend.steps_per_frame = args.steps_per_frame or max(1, round(period / timestep))
+        if not args.gravity:
+            backend.model.opt.gravity[:] = 0.0
+        logger.info(
+            "MIDAS MuJoCo loaded (nq=%d, nu=%d), control=%.0f Hz, steps/frame=%d, "
+            "gravity=%s",
+            backend.model.nq, backend.model.nu, args.control_hz,
+            backend.steps_per_frame, args.gravity,
+        )
 
     # --- glove subscriber (minimal raw ZMQ; see glove_subscriber.GloveSubscriber) ---
     sub = GloveSubscriber(glove_topic, host)
@@ -309,6 +360,7 @@ def run(args: argparse.Namespace) -> None:
     last_report = start
     last_data_time = start
     closed = [False]
+    deadman_tripped = [False]
 
     def compute_targets(keypoints: np.ndarray) -> dict[str, float]:
         """Map one (21,3) keypoint frame to the 13 active-joint targets."""
@@ -404,25 +456,55 @@ def run(args: argparse.Namespace) -> None:
                 pass
 
     def viewer_running() -> bool:
-        return backend.viewer is None or backend.viewer.is_running()
+        """True while a viewer is open. False when there is no viewer at all.
+
+        This used to return True when ``viewer`` was None, so a run without a
+        viewer had no exit condition and spun invisibly forever.
+        """
+
+        viewer = getattr(backend, "viewer", None)
+        return viewer is not None and viewer.is_running()
 
     next_tick = time.monotonic()
     try:
-        if args.headless:
-            logger.info("Headless run for %.0fs (no viewer)...", args.duration)
-        else:
+        has_viewer = getattr(backend, "viewer", None) is not None
+        if has_viewer:
             logger.info(
                 "Viewer open — move your gloved hand. Ctrl-C or close window to stop."
             )
+        elif args.duration:
+            logger.info("Running for %.0fs (no viewer)...", args.duration)
+        else:
+            logger.info("Running with no viewer and no --duration. Ctrl-C to stop.")
         while True:
-            if args.headless and time.monotonic() - start >= args.duration:
+            # --duration applies to every run, not only --headless.
+            if args.duration and time.monotonic() - start >= args.duration:
                 break
-            if not args.headless and not viewer_running():
+            if has_viewer and not viewer_running():
                 break
             update_control()
             # Send every tick (latest control, held between glove frames) so the
             # sim keeps stepping and the viewer stays synced at a steady rate.
-            backend.send(last_control)
+            # But a held frame is only safe for so long: without this the loop
+            # would keep commanding a pose against a dead publisher forever,
+            # which on hardware means leaning on an object indefinitely.
+            stale_s = time.monotonic() - last_data_time
+            if stale_s > args.stale_timeout > 0:
+                if not deadman_tripped[0]:
+                    deadman_tripped[0] = True
+                    logger.error(
+                        "No glove data for %.1fs (> --stale-timeout %.1fs) — "
+                        "holding position and disarming if armed.",
+                        stale_s, args.stale_timeout,
+                    )
+                    disarm = getattr(backend, "disarm", None)
+                    if callable(disarm):
+                        disarm()
+            else:
+                if deadman_tripped[0]:
+                    logger.info("Glove data resumed after %.1fs.", stale_s)
+                    deadman_tripped[0] = False
+                backend.send(last_control)
             report_maybe()
             next_tick += period
             sleep_s = next_tick - time.monotonic()
@@ -510,10 +592,12 @@ def main() -> None:
         "--mujoco-viewer", action="store_true", help="Launch the MuJoCo passive viewer"
     )
     parser.add_argument(
-        "--headless", action="store_true", help="No viewer (needs no display)"
+        "--headless", action="store_true",
+        help="No viewer (needs no display). Mutually exclusive with --mujoco-viewer.",
     )
     parser.add_argument(
-        "--duration", type=float, default=10.0, help="Headless run length (s)"
+        "--duration", type=float, default=None,
+        help="Stop after this many seconds. Applies with or without a viewer.",
     )
     parser.add_argument(
         "--control-hz",
@@ -563,6 +647,13 @@ def main() -> None:
         help="Log the 13 joint targets each solved frame",
     )
     # MuJoCo model location (else MIDAS_HAND_MUJOCO_DIR / sibling repo discovery).
+    add_backend_arguments(parser, default="mujoco", include_mujoco=False)
+    parser.add_argument(
+        "--stale-timeout", type=float, default=0.5,
+        help="Stop commanding if no glove frame arrives for this long (s). "
+             "0 disables the deadman. On hardware this is what prevents leaning "
+             "on an object forever after the publisher dies.",
+    )
     parser.add_argument("--xml-path", default=None, help="Explicit MJCF path override")
     parser.add_argument(
         "--mujoco-repo", default=None, help="Path to the midas_hand_mujoco repo"

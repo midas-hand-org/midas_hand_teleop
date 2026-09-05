@@ -155,6 +155,7 @@ class HardwareBackend:
         max_step_rad: float = 0.05,
         update_rate_hz: float = 50.0,
         interpolation_alpha: float = 0.35,
+        start_armed: bool = True,
     ):
         from midas_hand_api import DEFAULT_CONFIG_PATH, HandConfig, MidasHand
 
@@ -182,13 +183,19 @@ class HardwareBackend:
             config = replace(config, **updates)
 
         self.hand = MidasHand(config=config, autoconnect=autoconnect)
+        # configure(enable_torque=False) is the ONLY call that disables torque,
+        # selects current-based position mode, and writes the goal-current cap.
+        # Skipping it leaves motors from a crashed run live with whatever cap
+        # they had, so it runs even when starting disarmed.
         if configure:
             self.hand.configure(enable_torque=False)
         self._last_command = self._read_start_positions()
         self._target_command = self._last_command.copy()
+        # The first commanded pose is the measured pose, so arming cannot jump.
         self.hand.set_positions(self._last_command, clip=True)
-        if configure:
-            self.hand.enable_torque()
+        self._armed = False
+        if start_armed:
+            self.arm()
         if self.update_rate_hz > 0:
             self._command_thread = threading.Thread(
                 target=self._run_command_loop,
@@ -202,10 +209,44 @@ class HardwareBackend:
             raise RuntimeError("Hardware command loop failed") from self._loop_error
         target = self._prepare_target(result)
         if self.update_rate_hz <= 0:
-            self._send_interpolated_command(target)
+            if self._armed:
+                self._send_interpolated_command(target)
             return
         with self._lock:
             self._target_command = target
+
+    @property
+    def is_armed(self) -> bool:
+        return self._armed
+
+    def arm(self) -> None:
+        """Enable torque and start tracking, from the current measured pose.
+
+        Re-seeds the command from what the hand is actually doing first, so
+        arming after a pause does not snap the fingers to a stale target.
+        """
+
+        with self._lock:
+            if self._armed:
+                return
+            measured = self._read_start_positions()
+            self._last_command = measured
+            self._target_command = measured.copy()
+        self.hand.set_positions(self._last_command, clip=True)
+        self.hand.enable_torque()
+        with self._lock:
+            self._armed = True
+
+    def disarm(self) -> None:
+        """Stop commanding and drop torque. Safe to call repeatedly."""
+
+        with self._lock:
+            self._armed = False
+        try:
+            self.hand.disable_torque()
+        except Exception:
+            # Never let a teardown failure mask the caller's own error path.
+            pass
 
     def measured(self) -> dict[str, float]:
         """Snapshot of the last positions read by the command thread.
@@ -255,6 +296,7 @@ class HardwareBackend:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            self._armed = False
         if self._command_thread is not None:
             self._command_thread.join(timeout=1.0)
         self.hand.shutdown()
@@ -271,9 +313,11 @@ class HardwareBackend:
             with self._lock:
                 if self._closed:
                     return
+                armed = self._armed
                 target = self._target_command.copy()
             try:
-                self._send_interpolated_command(target)
+                if armed:
+                    self._send_interpolated_command(target)
                 self._sample_state()
             except Exception as exc:
                 self._loop_error = exc
