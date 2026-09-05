@@ -25,12 +25,20 @@ Mapping (``--retarget``):
   ``retarget_landmarks`` runs the dex_retargeting NLopt vector optimizer, the
   MIDAS geometric postprocess (finger curl / thumb opposition), neutral
   calibration, and PIP-DIP coupling. Tuning transfers to the real robot. Knobs:
-  ``--scaling-factor``, ``--no-finger-postprocess`` / ``--no-thumb-postprocess``
-  (set both to let the pure optimizer drive the joints), ``--coupling-mode``,
-  ``--calibrate-delay``, and the finger/thumb gains.
+  ``--profile`` (glove/vision base tuning), ``--scaling-factor``,
+  ``--no-finger-postprocess`` / ``--no-thumb-postprocess`` (set both to let the
+  pure optimizer drive the joints), ``--coupling-mode``, ``--calibrate-delay``
+  (ON by default for the glove — hold an open hand at startup), and the
+  finger/thumb gains (which override the profile).
 
 * ``geometric`` — the lightweight direct map from the first milestone: call the
   postprocess functions on their own (no optimizer, no IK), rotation-invariant.
+
+The default postprocess path is invariant to the input coordinate frame (any
+rotation/reflection); if the glove tracks poorly the cause is the keypoint
+geometry (node mapping / skeleton ROM), the neutral offset (calibration), or
+smoothing — use ``midas-hand-diag`` to pinpoint which. See that module's
+docstring.
 
 Both emit exactly the 13 ``ACTIVE_JOINT_NAMES`` (index/middle/ring: mcp_abad,
 mcp_pitch, pip; thumb: cmc_roll, cmc_side, mcp, dip) by name, already
@@ -61,7 +69,7 @@ import argparse
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -72,7 +80,11 @@ from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
 )
-from midas_hand_retargeter.tuning import RetargeterTuning
+from midas_hand_retargeter.tuning import (
+    PROFILES,
+    RetargeterTuning,
+    tuning_for_source,
+)
 from midas_hand_teleop.backends import MujocoBackend
 from midas_hand_teleop.manus_glove.glove_subscriber import (
     DATA_OUTPUT_PORT,
@@ -145,15 +157,52 @@ class _EmaFilter:
         return dict(self._values)
 
 
+_GAIN_ARGS = (
+    "finger_curl_gain",
+    "finger_abad_gain",
+    "thumb_cmc_side_gain",
+    "thumb_cmc_roll_gain",
+    "thumb_flexion_gain",
+)
+
+
 def build_tuning(args: argparse.Namespace) -> RetargeterTuning:
-    """Construct a ``RetargeterTuning`` from the CLI gain overrides."""
-    return RetargeterTuning(
-        finger_curl_gain=args.finger_curl_gain,
-        finger_abad_gain=args.finger_abad_gain,
-        thumb_cmc_side_gain=args.thumb_cmc_side_gain,
-        thumb_cmc_roll_gain=args.thumb_cmc_roll_gain,
-        thumb_flexion_gain=args.thumb_flexion_gain,
-    )
+    """Build the tuning from the selected source profile plus explicit overrides.
+
+    The base profile (``--profile``) supplies source-appropriate gains, smoothing,
+    and bend normalizers. Any ``--*-gain`` flag the user set explicitly (i.e. not
+    ``None``) overrides the corresponding profile field.
+    """
+    base = tuning_for_source(args.profile)
+    overrides = {
+        name: getattr(args, name)
+        for name in _GAIN_ARGS
+        if getattr(args, name) is not None
+    }
+    return replace(base, **overrides) if overrides else base
+
+
+def resolve_filter_alpha(
+    args: argparse.Namespace, full_mode: bool, tuning: RetargeterTuning
+) -> float:
+    """Resolve the glove-side EMA alpha, avoiding double smoothing.
+
+    In ``full`` mode the ``MidasHandRetargeter`` already applies per-joint EMA
+    smoothing (from the tuning profile), so the default here is 1.0 (no extra
+    stage). In ``geometric`` mode the bare postprocess functions do not smooth, so
+    the default is the profile's finger smoothing alpha. An explicit
+    ``--filter-alpha`` always wins, with a warning if it would double-smooth.
+    """
+    if args.filter_alpha is not None:
+        if full_mode and args.filter_alpha < 1.0:
+            logger.warning(
+                "--filter-alpha %.2f stacks on the retargeter's internal smoothing "
+                "(double smoothing). Full mode already smooths via the profile; use "
+                "1.0 here and tune finger/thumb_smoothing_alpha in the profile instead.",
+                args.filter_alpha,
+            )
+        return args.filter_alpha
+    return 1.0 if full_mode else tuning.finger_smoothing_alpha
 
 
 def build_retargeter(
@@ -187,8 +236,9 @@ def run(args: argparse.Namespace) -> None:
     retargeter = build_retargeter(args, tuning)  # None => geometric direct-map
     hand_type = "Right" if args.side == "right" else "Left"
     logger.info(
-        "Retargeting mode: %s%s",
+        "Retargeting mode: %s (profile=%s)%s",
         args.retarget,
+        args.profile,
         f" (scaling={args.scaling_factor}, finger_pp={args.finger_postprocess}, "
         f"thumb_pp={args.thumb_postprocess}, coupling={args.coupling_mode})"
         if retargeter is not None
@@ -235,7 +285,21 @@ def run(args: argparse.Namespace) -> None:
     sub = GloveSubscriber(glove_topic, host)
     logger.info("Subscribed to %s on %s:%d", glove_topic, host, DATA_OUTPUT_PORT)
 
-    ema = _EmaFilter(args.filter_alpha)
+    filter_alpha = resolve_filter_alpha(args, retargeter is not None, tuning)
+    logger.info(
+        "Smoothing: glove EMA alpha=%.2f%s",
+        filter_alpha,
+        " (off; retargeter smooths internally)"
+        if retargeter is not None and filter_alpha >= 1.0
+        else "",
+    )
+    if retargeter is not None and args.calibrate_delay > 0:
+        logger.info(
+            "Neutral calibration ON: hold a relaxed OPEN hand for the first %.1fs "
+            "— that pose becomes MIDAS zero.",
+            args.calibrate_delay,
+        )
+    ema = _EmaFilter(filter_alpha)
     last_control = _Control({name: 0.0 for name in ACTIVE_JOINT_NAMES})
 
     solves = 0
@@ -390,6 +454,15 @@ def main() -> None:
     )
     # --- Retargeting ---
     parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILES),
+        default="glove",
+        help="Tuning profile: source-appropriate gains/smoothing/bend-normalizers. "
+        "'glove' (default) is the starting point for the Manus glove; 'vision' "
+        "reproduces the webcam tuning for A/B comparison. Individual --*-gain flags "
+        "override the profile.",
+    )
+    parser.add_argument(
         "--retarget",
         choices=["full", "geometric"],
         default="full",
@@ -428,9 +501,10 @@ def main() -> None:
     parser.add_argument(
         "--calibrate-delay",
         type=float,
-        default=0.0,
+        default=2.0,
         help="(full) after N s, capture the held pose as the neutral (MIDAS-zero) "
-        "reference. 0 = off. Hold a relaxed/open hand during the countdown.",
+        "reference. 0 = off. Hold a relaxed/open hand during the countdown. Defaults "
+        "ON for the glove (vision captures neutral interactively; the glove cannot).",
     )
     parser.add_argument(
         "--mujoco-viewer", action="store_true", help="Launch the MuJoCo passive viewer"
@@ -458,9 +532,11 @@ def main() -> None:
     parser.add_argument(
         "--filter-alpha",
         type=float,
-        default=0.6,
+        default=None,
         help="EMA low-pass on the 13-joint vector: higher = less lag (1.0 = none). "
-        "Lower if the fingers jitter.",
+        "Default: full mode -> 1.0 (the retargeter smooths internally; tune the "
+        "profile's *_smoothing_alpha), geometric mode -> the profile's finger alpha. "
+        "Setting <1.0 in full mode double-smooths (a warning fires).",
     )
     parser.add_argument(
         "--no-gravity",
@@ -491,12 +567,12 @@ def main() -> None:
     parser.add_argument(
         "--mujoco-repo", default=None, help="Path to the midas_hand_mujoco repo"
     )
-    # Coarse geometric tuning gains (forwarded to RetargeterTuning).
-    parser.add_argument("--finger-curl-gain", type=float, default=1.0)
-    parser.add_argument("--finger-abad-gain", type=float, default=1.2)
-    parser.add_argument("--thumb-cmc-side-gain", type=float, default=1.5)
-    parser.add_argument("--thumb-cmc-roll-gain", type=float, default=0.6)
-    parser.add_argument("--thumb-flexion-gain", type=float, default=1.2)
+    # Coarse tuning gains. Default None => inherit from --profile; set to override.
+    parser.add_argument("--finger-curl-gain", type=float, default=None)
+    parser.add_argument("--finger-abad-gain", type=float, default=None)
+    parser.add_argument("--thumb-cmc-side-gain", type=float, default=None)
+    parser.add_argument("--thumb-cmc-roll-gain", type=float, default=None)
+    parser.add_argument("--thumb-flexion-gain", type=float, default=None)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 

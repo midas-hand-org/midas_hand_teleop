@@ -28,6 +28,7 @@ dev = ["pytest"]
 midas-hand-teleop = "midas_hand_teleop.webcam_demo:main"
 midas-manus-teleop = "midas_hand_teleop.manus_glove.manus_teleop:main"
 midas-manus-bridge = "midas_hand_teleop.manus_glove.manus_bridge:main"
+midas-hand-diag = "midas_hand_teleop.diagnostics:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -428,8 +428,55 @@ def _detect_handedness(positions: np.ndarray) -> str | None:
     return "left" if cross[1] > 0 else "right"
 
 
-def _positions_to_mediapipe(positions: np.ndarray) -> np.ndarray | None:
-    """Convert 25-node raw positions to MediaPipe 21-point keypoints."""
+# ─── Glove → MediaPipe-world frame correction ─────────────────────────────
+# The retargeter expects keypoints in the MediaPipe-world convention (see the
+# midas_hand_retargeter.human module docstring): a right-handed metric frame.
+# ONLY the frame's chirality is load-bearing for the geometric postprocess —
+# its palm basis is rotation-invariant, but the palm normal is a cross product
+# that FLIPS SIGN under a reflection, which inverts thumb opposition and finger
+# splay while leaving finger curl (a magnitude) intact.
+#
+# The legacy transform negated Y — a reflection (det = -1) fit to the OLD
+# wuji-retargeting IK solver. For the current palm-basis postprocess that flip
+# inverts chirality, so the default is now the identity (chirality-preserving).
+# If a captured pinch/curl pose shows inverted thumb opposition or mirrored
+# finger splay in ``midas-hand-diag``, switch presets via ``--glove-frame`` /
+# ``$MIDAS_GLOVE_FRAME`` (no code edit or recompile needed).
+GLOVE_FRAME_PRESETS: dict[str, np.ndarray] = {
+    "identity": np.diag([1.0, 1.0, 1.0]),
+    "flip_x": np.diag([-1.0, 1.0, 1.0]),
+    "flip_y": np.diag([1.0, -1.0, 1.0]),  # legacy wuji-era behavior
+    "flip_z": np.diag([1.0, 1.0, -1.0]),
+}
+DEFAULT_GLOVE_FRAME = "identity"
+
+
+def resolve_glove_frame(name: str | None) -> tuple[str, np.ndarray]:
+    """Resolve a glove-frame preset (CLI arg > ``$MIDAS_GLOVE_FRAME`` > default).
+
+    Returns ``(name, 3x3 transform)``. Raises ``ValueError`` on an unknown name.
+    """
+    chosen = name or os.environ.get("MIDAS_GLOVE_FRAME") or DEFAULT_GLOVE_FRAME
+    try:
+        return chosen, GLOVE_FRAME_PRESETS[chosen]
+    except KeyError:
+        raise ValueError(
+            f"Unknown glove frame {chosen!r}; expected one of "
+            f"{sorted(GLOVE_FRAME_PRESETS)}"
+        ) from None
+
+
+def _positions_to_mediapipe(
+    positions: np.ndarray,
+    frame_transform: np.ndarray | None = None,
+) -> np.ndarray | None:
+    """Convert 25-node raw positions to MediaPipe 21-point keypoints.
+
+    ``frame_transform`` is an optional 3x3 axis remap applied to every point so
+    the glove lands in the MediaPipe-world convention the retargeter expects.
+    Defaults to identity (no reflection); see ``GLOVE_FRAME_PRESETS`` for the
+    chirality rationale.
+    """
     keypoints = np.zeros((21, 3), dtype=np.float64)
     filled = 0
     for node_idx, mp_idx in NODE_TO_MEDIAPIPE.items():
@@ -438,10 +485,8 @@ def _positions_to_mediapipe(positions: np.ndarray) -> np.ndarray | None:
             filled += 1
     if filled < 15:
         return None
-    # Negate Y axis to match the wuji-retargeting IK solver's expected
-    # coordinate convention. The Manus VUH coordinate system used here
-    # outputs Y in the opposite direction from what the retargeter wants.
-    keypoints[:, 1] *= -1
+    if frame_transform is not None:
+        keypoints = keypoints @ np.asarray(frame_transform, dtype=np.float64).T
     return keypoints
 
 
@@ -453,12 +498,24 @@ def run_bridge(
     rate_hz: float = 120.0,
     haptics: bool = True,
     host: str | None = None,
+    glove_frame: str | None = None,
 ) -> None:
     """Run the dual-hand Manus bridge.
 
     ``host`` is the data-center host to publish to; if None it falls back to
     ``$MIDAS_DATA_CENTER_HOST`` then ``localhost``.
+
+    ``glove_frame`` selects the axis remap applied to published keypoints (see
+    ``GLOVE_FRAME_PRESETS``); if None it falls back to ``$MIDAS_GLOVE_FRAME``
+    then the identity default.
     """
+    frame_name, frame_transform = resolve_glove_frame(glove_frame)
+    logger.info(
+        "Glove frame: %s (det=%+.0f)%s",
+        frame_name,
+        float(np.linalg.det(frame_transform)),
+        "" if frame_name == DEFAULT_GLOVE_FRAME else " [non-default]",
+    )
     # ── Resilient publisher ──
     # ZMQ PUB/connect auto-reconnects TCP transparently when the downstream
     # subscriber dies and comes back, so bog-standard DataCenter restarts
@@ -567,7 +624,7 @@ def run_bridge(
     if rc != 0:
         # Silent failure here leaves gloves in an undefined coordinate frame,
         # which breaks both the geometric-handedness cross-product sign and
-        # the Y-axis negation in _positions_to_mediapipe downstream.
+        # the frame-transform assumptions in _positions_to_mediapipe downstream.
         logger.error("CoreSdk_InitializeCoordinateSystemWithVUH failed: %d", rc)
         sys.exit(1)
 
@@ -738,7 +795,7 @@ def run_bridge(
                 last_frame = hand_data.frame_count
 
                 try:
-                    keypoints = _positions_to_mediapipe(positions)
+                    keypoints = _positions_to_mediapipe(positions, frame_transform)
                     if keypoints is not None:
                         # The vendored proto carries only keypoints + format (no
                         # timestamp); the MIDAS pipeline doesn't use the timestamp.
@@ -993,6 +1050,14 @@ def main() -> None:
         action="store_true",
         help="Disable haptic output (vibration driven by sim fingertip contact forces)",
     )
+    parser.add_argument(
+        "--glove-frame",
+        choices=sorted(GLOVE_FRAME_PRESETS),
+        default=None,
+        help="Axis remap for published keypoints (default: $MIDAS_GLOVE_FRAME or "
+        f"'{DEFAULT_GLOVE_FRAME}'). Use 'flip_*' if midas-hand-diag reports inverted "
+        "thumb opposition / mirrored finger splay.",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -1006,6 +1071,7 @@ def main() -> None:
         rate_hz=args.rate,
         haptics=not args.no_haptics,
         host=args.host,
+        glove_frame=args.glove_frame,
     )
 
 
