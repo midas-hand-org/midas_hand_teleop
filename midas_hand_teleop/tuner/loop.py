@@ -16,8 +16,6 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
-
-from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.postprocess import analytic_debug
 
 from ..manus_glove.glove_subscriber import (

@@ -11,9 +11,9 @@ import urllib.error
 import urllib.request
 
 import pytest
-
 from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.store import ProfileStore
+
 from midas_hand_teleop.tuner.schema import build_schema
 from midas_hand_teleop.tuner.server import make_server
 from midas_hand_teleop.tuner.state import TunerState

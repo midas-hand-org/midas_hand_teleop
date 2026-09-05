@@ -72,7 +72,6 @@ import time
 from dataclasses import dataclass, replace
 
 import numpy as np
-
 from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.config import ANALYTIC_MODE, VECTOR_MODE
 from midas_hand_retargeter.constants import (
@@ -89,6 +88,7 @@ from midas_hand_retargeter.tuning import (
     RetargeterTuning,
     tuning_for_source,
 )
+
 from midas_hand_teleop.backend_cli import (
     add_backend_arguments,
     build_backend,
@@ -351,7 +351,7 @@ def run(args: argparse.Namespace) -> None:
             args.calibrate_delay,
         )
     ema = _EmaFilter(filter_alpha)
-    last_control = _Control({name: 0.0 for name in ACTIVE_JOINT_NAMES})
+    last_control = _Control(dict.fromkeys(ACTIVE_JOINT_NAMES, 0.0))
 
     solves = 0
     parse_failures = 0

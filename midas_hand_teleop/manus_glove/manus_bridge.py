@@ -263,7 +263,7 @@ def _rebuild_sender_impl(
 
 def _spawn_publish_thread_if_needed(
     side: str,
-    hand_data: "_HandData",
+    hand_data: _HandData,
     spawned: dict[str, threading.Thread],
     thread_factory,
 ) -> bool:

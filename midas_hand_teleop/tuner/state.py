@@ -11,8 +11,9 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.store import ProfileStore

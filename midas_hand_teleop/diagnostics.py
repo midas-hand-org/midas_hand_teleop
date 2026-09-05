@@ -46,16 +46,16 @@ import logging
 import math
 
 import numpy as np
-
 from midas_hand_retargeter.constants import ACTIVE_JOINT_NAMES
 from midas_hand_retargeter.postprocess import (
     FINGER_LANDMARKS,
     THUMB_LANDMARKS,
-    _palm_basis,
     finger_joint_targets_from_landmarks,
+    palm_basis,
     thumb_joint_targets_from_landmarks,
 )
 from midas_hand_retargeter.tuning import RetargeterTuning, tuning_for_source
+
 from midas_hand_teleop.manus_glove.manus_bridge import GLOVE_FRAME_PRESETS
 
 logger = logging.getLogger("midas_hand_diag")
@@ -148,7 +148,7 @@ def build_hand(
         )
         kp[mcp_i], kp[pip_i], kp[dip_i], kp[tip_i] = chain
     thumb = _thumb_points(thumb_curl, thumb_side, thumb_oppose)
-    for point, index in zip(thumb, THUMB_LANDMARKS):
+    for point, index in zip(thumb, THUMB_LANDMARKS, strict=True):
         kp[index] = point
     return kp
 
@@ -187,15 +187,13 @@ def analyze_frame(kp: np.ndarray, tuning: RetargeterTuning) -> dict:
     """Compute palm basis, per-finger/thumb intermediates, and the 13 targets."""
 
     kp = np.asarray(kp, dtype=np.float64)
-    forward, lateral, normal = _palm_basis(kp)
+    forward, lateral, normal = palm_basis(kp)
     targets = {}
     targets.update(finger_joint_targets_from_landmarks(kp, tuning))
     targets.update(thumb_joint_targets_from_landmarks(kp, tuning))
 
     per_finger = {}
-    for finger, (mcp_i, pip_i, dip_i, tip_i) in FINGER_LANDMARKS.items():
-        proximal = kp[pip_i] - kp[mcp_i]
-        distal = kp[tip_i] - kp[dip_i]
+    for finger, (mcp_i, _pip_i, _dip_i, tip_i) in FINGER_LANDMARKS.items():
         per_finger[finger] = {
             "pitch": targets[f"{finger}_mcp_pitch_joint"],
             "pip": targets[f"{finger}_pip_joint"],
@@ -227,7 +225,7 @@ def frame_handedness(kp: np.ndarray) -> tuple[float, float]:
     """
 
     kp = np.asarray(kp, dtype=np.float64)
-    _, _, normal = _palm_basis(kp)
+    _, _, normal = palm_basis(kp)
     reaches = []
     for mcp_i, _pip_i, _dip_i, tip_i in FINGER_LANDMARKS.values():
         reaches.append(float(np.dot(kp[tip_i] - kp[mcp_i], normal)))

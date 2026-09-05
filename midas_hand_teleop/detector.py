@@ -7,7 +7,6 @@ from pathlib import Path
 from urllib.request import urlretrieve
 
 import numpy as np
-
 from midas_hand_retargeter.human import (
     mediapipe_world_to_mano_landmarks,
     mirror_landmarks_for_robot_hand,

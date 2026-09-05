@@ -10,11 +10,11 @@ import argparse
 
 import numpy as np
 import pytest
-
 from midas_hand_retargeter.constants import (
     ACTIVE_JOINT_NAMES,
     HARDWARE_MOTOR_JOINT_NAMES,
 )
+
 from midas_hand_teleop import backend_cli
 from midas_hand_teleop.manus_glove.manus_teleop import _Control
 
@@ -99,8 +99,9 @@ def test_left_hand_is_refused_rather_than_warned():
 def test_dead_cli_flags_are_gone():
     """~20 flags were parsed and silently discarded; they misled tuning work."""
 
-    from midas_hand_teleop import webcam_demo
     import inspect
+
+    from midas_hand_teleop import webcam_demo
 
     source = inspect.getsource(webcam_demo)
     for flag in ("--thumb-pinch-gain", "--thumb-cmc-roll-signed",

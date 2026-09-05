@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Everything that needs no glove, no camera, no sim and no hardware.
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev,manus,mujoco]"
+      - name: Importing the bridge must not load the Manus SDK
+        run: |
+          python - <<'PY'
+          import ctypes, midas_hand_teleop.manus_glove.manus_bridge as bridge
+          # CDLL lives inside run_bridge, not at import, which is what makes the
+          # SDK-free tests possible at all.
+          assert hasattr(bridge, "run_bridge")
+          PY
+      - run: pytest -q
+
+  # The glove pipeline end to end, driven by the synthetic publisher: no glove,
+  # no SDK, no display.
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev,manus,mujoco]"
+      - name: Synthetic glove -> retarget -> MuJoCo
+        run: |
+          python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &
+          sleep 3
+          timeout 60 midas-manus-teleop --backend mujoco --duration 5
+      - name: Synthetic glove -> tuner HTTP API
+        run: |
+          python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &
+          sleep 3
+          timeout 60 midas-hand-tune --backend print --port 8765 --duration 12 &
+          sleep 8
+          python - <<'PY'
+          import json, urllib.request
+          telemetry = json.load(urllib.request.urlopen("http://127.0.0.1:8765/api/telemetry"))
+          assert telemetry["glove"]["connected"], telemetry["glove"]
+          assert len(telemetry["commanded"]) == 13, telemetry["commanded"]
+          print("tuner telemetry OK:", telemetry["glove"])
+          PY
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff
+      - run: ruff check .

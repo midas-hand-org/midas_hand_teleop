@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
 from midas_hand_retargeter import MidasHandRetargeter, RetargetingResult
 
 from .detector import HandLandmarkFrame, MediaPipeHandDetector

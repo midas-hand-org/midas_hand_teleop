@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
-
 from midas_hand_retargeter.constants import ACTIVE_JOINT_NAMES
 from midas_hand_retargeter.tuning import vision_tuning
+
 from midas_hand_teleop.diagnostics import (
     CANONICAL_POSES,
     analyze_frame,

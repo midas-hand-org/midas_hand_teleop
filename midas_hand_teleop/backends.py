@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
-
 from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
 from midas_hand_retargeter.paths import default_mjcf_path
 from midas_hand_retargeter.retargeter import RetargetingResult
@@ -282,13 +281,18 @@ class HardwareBackend:
             positions, currents = self.hand.read_pos(), self.hand.read_cur()
         except Exception:
             return  # keep the previous snapshot; staleness is reported by age
-        names = HARDWARE_MOTOR_JOINT_NAMES
+        # Index by the hand's actual motor ids, not the full 13-name list:
+        # HandConfig supports motor subsets, and pairing a short reading against
+        # the full name list would silently attribute values to the wrong joints.
+        names = [HARDWARE_MOTOR_JOINT_NAMES[i] for i in self.hand.motor_ids]
         with self._lock:
             self._measured = {
-                name: float(value) for name, value in zip(names, positions)
+                name: float(value)
+                for name, value in zip(names, positions, strict=True)
             }
             self._measured_current_ma = {
-                name: float(value) for name, value in zip(names, currents)
+                name: float(value)
+                for name, value in zip(names, currents, strict=True)
             }
             self._measured_seq += 1
             self._measured_monotonic = time.monotonic()

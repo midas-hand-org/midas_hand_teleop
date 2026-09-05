@@ -6,7 +6,6 @@ import argparse
 import time
 
 import cv2
-
 from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.adaptor import PIP_DIP_LOOKUP_MODE, SUPPORTED_COUPLING_MODES
 from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
@@ -14,7 +13,6 @@ from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
 from .backend_cli import build_backend
 from .detector import MediaPipeHandDetector
 from .pipeline import MidasTeleopPipeline
-
 
 # print, not hardware: a bare `midas-hand-teleop` must not energise motors.
 DEFAULT_BACKEND = "print"
