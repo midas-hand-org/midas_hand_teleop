@@ -16,13 +16,13 @@ import logging
 import mimetypes
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from midas_hand_retargeter import presets
-from midas_hand_retargeter.params import RetargetProfile
 
 from .schema import build_schema
 
@@ -170,14 +170,10 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
         profile = self.state.profile
         path = presets.save(
             Path(self.preset_dir) / f"{name}.json",
-            RetargetProfile(
-                index=profile.index,
-                middle=profile.middle,
-                ring=profile.ring,
-                thumb=profile.thumb,
-                name=name,
-                source=profile.source,
-            ),
+            # dataclasses.replace, not a field-by-field rebuild: the previous
+            # version omitted dexpilot=, so every solver knob an operator tuned
+            # was silently reset to defaults on save, under a "saved" message.
+            replace(profile, name=name),
             neutral_offsets=body.get("neutral_offsets") or {},
         )
         self.state.note(f"saved preset {name}")

@@ -53,6 +53,7 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
     "eta1": (0.0, 0.05, 0.0005),
     "eta2": (0.0, 0.10, 0.001),
     "low_pass_alpha": (0.05, 1.0, 0.01),
+    "thumb_vector_scale": (0.8, 1.6, 0.01),
 }
 
 #: Which joint's limits bound each ``*_range`` field. ``{finger}`` is filled in.
@@ -132,6 +133,10 @@ HELP: dict[str, str] = {
     "eta1": "Target gap (m) for thumb-to-finger pairs once snapped.",
     "eta2": "Target gap (m) for finger-to-finger pairs once snapped.",
     "low_pass_alpha": "Solver-side low-pass. 1.0 = off.",
+    "thumb_vector_scale": "Extra reach given to the thumb's own targets. 1.0 = "
+    "off, and off is the default: the thumb-root rebase already removes most of "
+    "the MIDAS thumb's proportional excess. Raise toward ~1.15 for a straighter "
+    "thumb, at a measured cost of 1-3 mm of fingertip accuracy.",
 }
 
 SECTIONS = ("thumb", "index", "middle", "ring", "dexpilot")

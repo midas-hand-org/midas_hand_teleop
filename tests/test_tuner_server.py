@@ -197,7 +197,9 @@ def test_dexpilot_schema_leads_with_scaling_factor():
     }
     assert controls["scaling_factor"]["advanced"] is False
     assert "hand size" in controls["scaling_factor"]["help"].lower()
-    assert len(controls) == 9
+    # 9 solver knobs plus the optional thumb reach multiplier.
+    assert len(controls) == 10
+    assert controls["thumb_vector_scale"]["advanced"] is True
 
 
 @pytest.mark.parametrize("mode", ["analytic", "dexpilot", "refine", "vector"])
@@ -232,3 +234,23 @@ def test_defaults_cover_every_control_the_ui_can_render():
         for section in schema["sections"]:
             for control in section["controls"]:
                 assert control["path"] in schema["defaults"], control["path"]
+
+
+def test_saving_a_preset_keeps_the_solver_knobs(server, tmp_path):
+    """Regression: the save path rebuilt the profile field by field and omitted
+    `dexpilot=`, so every DexPilot solver knob an operator tuned was reset to
+    defaults on save — under a "saved preset" confirmation."""
+
+    state, base = server
+    post(base, "/api/profile", {"updates": {
+        "dexpilot.scaling_factor": 1.33,
+        "dexpilot.thumb_vector_scale": 1.15,
+        "index.curl_gain": 1.7,
+    }})
+    post(base, "/api/presets/save", {"name": "solver"})
+    post(base, "/api/profile/reset", {})
+
+    loaded = post(base, "/api/presets/load", {"name": "solver"})["parameters"]
+    assert loaded["dexpilot.scaling_factor"] == 1.33
+    assert loaded["dexpilot.thumb_vector_scale"] == 1.15
+    assert loaded["index.curl_gain"] == 1.7
