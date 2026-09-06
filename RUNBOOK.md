@@ -125,6 +125,71 @@ Then, in order:
 **`TODO(hardware-day)`** the *Arm hardware* button stays disabled here; it needs
 a hardware backend, which is B4.
 
+### A5b. DexPilot mode — fingertip geometry  ☐  ← **run this if fingers look wrong relative to each other**
+
+The analytic map reads joint *angles* only. It is provably blind to absolute
+geometry (scaling a hand 0.6x-3x moves its output by 3e-6 rad) and gives three
+equally-curled fingers bit-identical commands, so it structurally cannot place
+fingertips relative to one another. DexPilot optimises six pairwise
+inter-fingertip vectors plus four palm-rooted ones, which is that missing
+capability.
+
+```bash
+midas-hand-tune --mode dexpilot --open
+```
+
+**Calibrate `scaling_factor` FIRST — nothing else matters until it is right.**
+It is your hand size relative to the robot's, and it is the one parameter the
+analytic map never had. A 0.7x-1.5x change moves joints by ~1.5 rad.
+
+Estimate it before touching the slider:
+
+```bash
+python - <<'EOF'
+import numpy as np
+from midas_hand_retargeter import MidasHandRetargeter
+r = MidasHandRetargeter.create(mode="dexpilot")
+rb = r.dex_retargeting.optimizer.robot
+rb.compute_forward_kinematics(np.zeros(19))
+inv = np.linalg.inv(rb.get_link_pose(rb.get_link_index("palm_base")))
+for n, link in (("index","index_tip"),("middle","middle_tip"),("ring","ring_tip")):
+    p = (inv @ rb.get_link_pose(rb.get_link_index(link)))[:3,3]
+    print(f"robot {n}: {np.linalg.norm(p)*1000:.0f} mm")
+EOF
+```
+
+The MIDAS hand reaches ~218 mm from `palm_base` to fingertip with the hand
+open. Measure your own wrist-to-fingertip with a ruler, then start at
+`robot / yours` — about **1.2 for a 180 mm hand, 1.55 for a 140 mm hand**. The
+inherited default of 1.15 is almost certainly too low.
+
+**`RECORD:` my wrist-to-fingertip = ________ mm → starting scaling = ________**
+
+Then, on the slider:
+
+- **too low** → fingers over-curl and rail into their limits, and the pose
+  stops responding to your hand at all. This is the most common failure.
+- **too high** → fingers never close far enough.
+- Open your hand fully: the sim should be open, not slightly curled.
+  Close it: it should close without saturating early.
+
+**`RECORD:` final scaling_factor = ________**
+
+Only then touch the rest: `project_dist` (the gap at which a fingertip pair
+snaps together — raise it if pinches hover, lower it if fingers stick to each
+other), `eta1` (how close a snapped thumb-finger pinch gets), and `norm_delta`
+(smoother but laggier).
+
+Then A/B it honestly against `--mode analytic` on the same motion. Analytic is
+6x cheaper and rock-solid for curl; DexPilot is the one that gets relative
+fingertip placement right. Which you want depends on the task.
+
+**`TODO(hardware-day)` fingertip offsets.** DexPilot aims at the tip frames in
+`urdf.TIP_LINKS`, which are CAD estimates (`thumb_tip` at `0 -0.042 -0.010`,
+fingers at `0 0.036 -0.009`). In this mode they are load-bearing — a wrong
+offset means the solver optimises toward the wrong point. Measure them on the
+real hand and correct them.
+
 ### A6. Latency is honest  ☐
 
 With the tuner open, unplug the glove dongle. Within ~0.5 s the glove chip must
@@ -326,6 +391,8 @@ The hand has **no pinky**, so element 4 of the 5-float power vector is always 0.
 | | why |
 |---|---|
 | Left hand unsupported | Mirroring does nothing — the analytic map is reflection-invariant (verified max \|Δ\| = 0.0). Real support needs sign-aware splay and a signed thumb opposition, or a left model. |
-| Thumb cannot tell palmar from dorsal deviation | `abs()` on the opposition angle. Worth revisiting while the parameter schema is still young. |
+| Thumb cannot tell palmar from dorsal deviation | `abs()` on the opposition angle. Affects analytic mode only; DexPilot has no such term. |
+| Analytic mode cannot place fingertips relative to each other | Structural: it reads angles, not positions. Use `--mode dexpilot` (A5b). |
+| DexPilot fingertip offsets are CAD estimates | Load-bearing in that mode; measure on hardware. See A5b. |
 | Dual glove untested | See A4. |
 | PIP sign disagreement | See B3. |
