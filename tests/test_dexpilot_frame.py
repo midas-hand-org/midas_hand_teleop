@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 from midas_hand_retargeter import MidasHandRetargeter, RetargetProfile
 from midas_hand_retargeter.config import DEXPILOT_MODE
-from midas_hand_retargeter.human import mediapipe_world_to_mano_landmarks
 
 needs_optimizer = pytest.mark.skipif(
     importlib.util.find_spec("dex_retargeting") is None,
@@ -22,29 +21,42 @@ needs_optimizer = pytest.mark.skipif(
 
 
 @needs_optimizer
-def test_dexpilot_is_sensitive_to_the_input_frame():
-    """Pins WHY the glove driver must not MANO-transform for this mode."""
+def test_dexpilot_is_rotation_invariant_but_chirality_sensitive():
+    """The two halves of the frame story, pinned together.
+
+    Rotations must wash out — the retargeter normalises into the operator's
+    palm basis, so how the hand is held is not finger articulation. A
+    reflection must NOT wash out: it is the difference between curling toward
+    the palm and curling backwards, and silently swallowing it is what left
+    the ring finger tracking inverted.
+    """
 
     from midas_hand_teleop.manus_glove.fake_glove_publisher import synthetic_hand
 
     retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
     retargeter.profile = RetargetProfile().with_values(
-        {"dexpilot.scaling_factor": 1.55}
+        {"dexpilot.scaling_factor": 1.1}
     )
     landmarks = synthetic_hand(0.5)
 
-    retargeter.reset()
-    for _ in range(25):
-        raw = retargeter.retarget_landmarks(landmarks).active_vector()
+    def solve(points):
+        retargeter.reset()
+        for _ in range(20):
+            result = retargeter.retarget_landmarks(points)
+        return result.active_vector()
 
-    retargeter.reset()
-    rotated = mediapipe_world_to_mano_landmarks(landmarks, hand_type="Right")
-    for _ in range(25):
-        mano = retargeter.retarget_landmarks(rotated).active_vector()
+    base = solve(landmarks)
 
-    assert np.abs(raw - mano).max() > 0.1, (
-        "if this ever becomes frame-invariant, the pairwise vectors have stopped "
-        "doing anything and the mode is pointless"
+    rotation = np.array(  # 90 degrees about X, a proper rotation
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    assert np.linalg.det(rotation) > 0
+    np.testing.assert_allclose(solve(landmarks @ rotation.T), base, atol=1e-4)
+
+    reflection = np.diag([1.0, -1.0, 1.0])
+    assert np.linalg.det(reflection) < 0
+    assert np.abs(solve(landmarks @ reflection.T) - base).max() > 0.1, (
+        "a mirrored hand must not produce the same command as a correct one"
     )
 
 

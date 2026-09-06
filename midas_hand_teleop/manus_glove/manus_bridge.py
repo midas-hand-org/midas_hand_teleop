@@ -442,13 +442,31 @@ def _detect_handedness(positions: np.ndarray) -> str | None:
 # If a captured pinch/curl pose shows inverted thumb opposition or mirrored
 # finger splay in ``midas-hand-diag``, switch presets via ``--glove-frame`` /
 # ``$MIDAS_GLOVE_FRAME`` (no code edit or recompile needed).
+#: Axis remaps applied to raw glove keypoints before publishing.
+#:
+#: **The determinant is what matters, not the axis.** As published, the Manus
+#: right-hand skeleton is mirrored relative to the MIDAS hand: measured on live
+#: glove data, curling a finger moves its tip +40 mm along the palm normal,
+#: while the robot's own fingers curl -27 mm along it. Any reflection
+#: (det = -1) corrects that; all three flips below give an identical result
+#: once the retargeter normalises into the palm frame.
+#:
+#: This was set to ``identity`` on the reasoning that chirality "is NOT what
+#: makes it track poorly". That is true of the analytic map and provably so —
+#: it is invariant to reflection — which is exactly why a mirrored frame went
+#: unnoticed. It is false for anything that compares 3D directions against the
+#: robot: with ``identity`` the DexPilot optimizer is asked to bend the fingers
+#: backwards, so it gives up and holds them extended 87% of the time, and the
+#: ring finger tracks *inverted* (correlation -0.10). Restoring a reflection
+#: takes that to +0.83, and mean inter-fingertip error from 17.1 mm to 9.6 mm.
 GLOVE_FRAME_PRESETS: dict[str, np.ndarray] = {
-    "identity": np.diag([1.0, 1.0, 1.0]),
+    "identity": np.diag([1.0, 1.0, 1.0]),  # mirrored; analytic-only
     "flip_x": np.diag([-1.0, 1.0, 1.0]),
-    "flip_y": np.diag([1.0, -1.0, 1.0]),  # legacy wuji-era behavior
+    "flip_y": np.diag([1.0, -1.0, 1.0]),
     "flip_z": np.diag([1.0, 1.0, -1.0]),
 }
-DEFAULT_GLOVE_FRAME = "identity"
+#: Reflection, so the published skeleton matches the robot's handedness.
+DEFAULT_GLOVE_FRAME = "flip_y"
 
 
 def resolve_glove_frame(name: str | None) -> tuple[str, np.ndarray]:

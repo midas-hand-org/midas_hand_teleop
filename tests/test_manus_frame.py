@@ -18,10 +18,23 @@ def _raw_positions(n: int = 25) -> np.ndarray:
     return np.arange(n * 3, dtype=np.float64).reshape(n, 3) * 0.001
 
 
-def test_default_is_identity_and_chirality_preserving():
+def test_default_reflects_to_match_the_robot_handedness():
+    """The published skeleton must match the robot's chirality.
+
+    Measured on live glove data: as published, curling a finger moves its tip
+    +40 mm along the palm normal while the robot's fingers curl -27 mm along
+    it, so the raw right-hand skeleton is mirrored relative to the MIDAS hand.
+
+    This test previously asserted the opposite (det > 0, "chirality
+    preserving"), which encoded the bug: the analytic map is provably
+    reflection-invariant, so a mirrored frame is invisible to it, while the
+    DexPilot optimizer is asked to bend the fingers backwards and holds them
+    extended instead.
+    """
+
     name, transform = resolve_glove_frame(None)
-    assert name == DEFAULT_GLOVE_FRAME == "identity"
-    assert np.linalg.det(transform) > 0  # no reflection
+    assert name == DEFAULT_GLOVE_FRAME
+    assert np.linalg.det(transform) < 0, "the default must be a reflection"
 
 
 def test_all_presets_are_orthogonal_axis_maps():
