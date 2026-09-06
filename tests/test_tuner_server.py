@@ -263,3 +263,14 @@ def test_saving_a_preset_keeps_the_solver_knobs(server, tmp_path):
     assert loaded["dexpilot.scaling_factor"] == 1.33
     assert loaded["dexpilot.thumb_vector_scale"] == 1.15
     assert loaded["index.curl_gain"] == 1.7
+
+
+def test_loading_a_preset_cannot_escape_the_preset_directory(server):
+    """Load validates its name exactly as save does. It joins the name onto
+    preset_dir, so this check is the only thing keeping a request inside it."""
+
+    _, base = server
+    for name in ("../escape", "..", ".hidden", "a/b", ""):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            post(base, "/api/presets/load", {"name": name})
+        assert excinfo.value.code == 400, name

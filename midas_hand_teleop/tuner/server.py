@@ -163,10 +163,23 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _save_preset(self, body: dict) -> None:
+    @staticmethod
+    def _preset_name(body: dict) -> str:
+        """Validate a preset name from the browser.
+
+        Presets are addressed by bare name and joined onto ``preset_dir``, so
+        this is the only thing keeping a request from walking out of that
+        directory. Deliberately NOT ``presets.resolve``: that accepts paths on
+        purpose, for the command line, where the caller is the operator.
+        """
+
         name = str(body.get("name") or "").strip()
-        if not name or "/" in name or name.startswith("."):
+        if not name or "/" in name or "\\" in name or name.startswith("."):
             raise ValueError("Preset name must be a simple filename")
+        return name
+
+    def _save_preset(self, body: dict) -> None:
+        name = self._preset_name(body)
         profile = self.state.profile
         path = presets.save(
             Path(self.preset_dir) / f"{name}.json",
@@ -180,7 +193,7 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "path": str(path)})
 
     def _load_preset(self, body: dict) -> None:
-        name = str(body.get("name") or "").strip()
+        name = self._preset_name(body)
         profile, neutral = presets.load(Path(self.preset_dir) / f"{name}.json")
         self.state.store.set(profile)
         self.state.note(f"loaded preset {name}")

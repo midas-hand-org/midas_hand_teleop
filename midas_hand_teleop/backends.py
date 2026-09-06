@@ -169,6 +169,7 @@ class HardwareBackend:
         self._measured: dict[str, float] = {}
         self._measured_current_ma: dict[str, float] = {}
         self._measured_seq = 0
+        self._rejected_frames = 0
         self._measured_monotonic = 0.0
         config = self._load_config(HandConfig, DEFAULT_CONFIG_PATH, config_path)
         updates = {}
@@ -206,7 +207,16 @@ class HardwareBackend:
     def send(self, result: RetargetingResult) -> None:
         if self._loop_error is not None:
             raise RuntimeError("Hardware command loop failed") from self._loop_error
-        target = self._prepare_target(result)
+        try:
+            target = self._prepare_target(result)
+        except ValueError as exc:
+            # Drop the frame and keep the previous target. Raising here would
+            # tear down the run on a single bad solve, which on hardware means
+            # losing torque mid-grasp for a fault that lasts one frame.
+            self._rejected_frames += 1
+            if self._rejected_frames % 60 == 1:
+                print(f"Dropping frame: {exc}")
+            return
         if self.update_rate_hz <= 0:
             if self._armed:
                 self._send_interpolated_command(target)
@@ -307,6 +317,15 @@ class HardwareBackend:
 
     def _prepare_target(self, result: RetargetingResult) -> np.ndarray:
         target = np.asarray(result.hardware_motor_positions, dtype=np.float64)
+        if not np.all(np.isfinite(target)):
+            # A non-finite goal position reaches the servo as garbage, and
+            # clip_positions cannot catch it: np.clip propagates NaN. The
+            # optimizer can emit one when nlopt fails on a degenerate frame, so
+            # this is a real path, not a theoretical one. Hold the last command.
+            raise ValueError(
+                "Refusing to command a non-finite joint target: "
+                f"{dict(zip(HARDWARE_MOTOR_JOINT_NAMES, target, strict=False))}"
+            )
         target *= self.command_scale
         return self.hand.clip_positions(target)
 

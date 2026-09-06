@@ -39,6 +39,11 @@ class LoopConfig:
     control_hz: float = 60.0
     duration_s: float | None = None
     start_proxy: bool = True
+    #: Deadman. With no glove frame for this long the hardware is disarmed and
+    #: has to be armed again by hand. The loop otherwise keeps re-solving its
+    #: last frame forever, which on hardware means leaning on whatever the hand
+    #: is holding until someone notices. 0 disables it.
+    stale_timeout_s: float = 0.5
 
 
 class TunerLoop:
@@ -62,6 +67,10 @@ class TunerLoop:
         self._last_frame_monotonic = 0.0
         self._frame_intervals: list[float] = []
         self._last_landmarks: np.ndarray | None = None
+        # Only a backend that can be armed gates on arming; the sim never does.
+        self.state.loop.hardware_available = callable(getattr(backend, "arm", None))
+        self._armed_applied = False
+        self._deadman_tripped = False
 
     # --- glove ---------------------------------------------------------
     def _poll_glove(self) -> np.ndarray | None:
@@ -125,6 +134,64 @@ class TunerLoop:
         except RuntimeError as exc:
             self.state.note(f"calibration failed: {exc}")
 
+    # --- hardware ------------------------------------------------------
+    def _service_arming(self) -> None:
+        """Apply the browser's arm switch to the backend, on transition only.
+
+        The HTTP thread deliberately does not touch the backend: arming enables
+        torque over the same serial bus the hardware command thread already
+        owns, and DynamixelClient has no documented thread safety. So the
+        browser only sets a flag, and it is acted on here, on the loop thread.
+        """
+
+        if not self.state.loop.hardware_available:
+            return
+        wanted = self.state.loop.armed
+        if wanted == self._armed_applied:
+            return
+        try:
+            self.backend.arm() if wanted else self.backend.disarm()
+        except Exception as exc:
+            # Fail closed: report disarmed rather than leave the UI claiming a
+            # torque state the hand is not actually in.
+            logger.exception("Arming the hardware failed")
+            self.state.loop.armed = False
+            self._armed_applied = False
+            self.state.note(f"arming failed: {exc}")
+            return
+        self._armed_applied = wanted
+        self.state.note("hardware ARMED" if wanted else "hardware disarmed")
+
+    def _service_deadman(self) -> None:
+        """Disarm if the glove has gone quiet, and require a manual re-arm.
+
+        Re-arming automatically on the next frame would let a flapping link
+        reconnect straight into whatever pose the operator's hand had drifted
+        into while they were not watching.
+        """
+
+        timeout = self.config.stale_timeout_s
+        if not self.state.loop.hardware_available or timeout <= 0:
+            return
+        stale = self.state.glove.age_s
+        if stale is None or stale <= timeout:
+            if self._deadman_tripped and self.state.glove.connected:
+                self._deadman_tripped = False
+                self.state.note("glove data resumed — arm again to resume tracking")
+            return
+        if self._deadman_tripped:
+            return
+        self._deadman_tripped = True
+        if self.state.loop.armed or self._armed_applied:
+            self.state.loop.armed = False
+            self._armed_applied = False
+            try:
+                self.backend.disarm()
+            except Exception:
+                logger.exception("Deadman disarm failed")
+            logger.error("No glove data for %.1fs — disarmed.", stale)
+            self.state.note(f"deadman: no glove data for {stale:.1f}s, disarmed")
+
     # --- main ----------------------------------------------------------
     def run(self) -> None:
         period = 1.0 / max(self.config.control_hz, 1e-6)
@@ -154,6 +221,8 @@ class TunerLoop:
                 self.state.loop.retarget_ms = (time.perf_counter() - solve_start) * 1000.0
 
                 self._service_calibration()
+                self._service_arming()
+                self._service_deadman()
                 self._send(result)
                 self._publish(result, self._last_landmarks)
 
@@ -191,5 +260,14 @@ class TunerLoop:
         )
 
     def close(self) -> None:
+        # Torque off before anything else can fail: close() runs on the way out
+        # of a Ctrl-C, and a hand left energised is the one outcome that must
+        # not depend on the rest of teardown succeeding.
+        disarm = getattr(self.backend, "disarm", None)
+        if callable(disarm):
+            try:
+                disarm()
+            except Exception:
+                logger.exception("Disarm during shutdown failed")
         self.subscriber.close()
         self.backend.close()

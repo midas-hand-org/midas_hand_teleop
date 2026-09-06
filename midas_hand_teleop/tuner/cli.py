@@ -5,10 +5,17 @@ Typical use, with no hardware at all::
     python -m midas_hand_teleop.manus_glove.fake_glove_publisher &
     midas-hand-tune
 
-With a real glove::
+With a real glove, driving the simulator::
 
     midas-manus-bridge &
-    midas-hand-tune --side right
+    midas-hand-tune --side right --mode dexpilot --mujoco-viewer --open
+
+With a real glove driving the REAL HAND. The hand starts disarmed and stays
+that way until you press "Arm hardware" in the browser; nothing is energised by
+launching this::
+
+    midas-manus-bridge &
+    midas-hand-tune --side right --mode dexpilot --backend hardware --open
 
 Then open http://127.0.0.1:8765.
 """
@@ -26,7 +33,7 @@ from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.store import ProfileStore
 from midas_hand_retargeter.tuning import PROFILES, tuning_for_source
 
-from ..backends import MujocoBackend, PrintBackend
+from ..backend_cli import add_backend_arguments, build_backend
 from ..shutdown import close_quietly, exit_without_atexit, protected_shutdown
 from .loop import LoopConfig, TunerLoop
 from .server import serve_in_background
@@ -47,9 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-proxy", action="store_true",
                         help="Do not start the built-in XSUB/XPUB relay.")
 
-    parser.add_argument("--backend", default="mujoco", choices=["mujoco", "print"],
-                        help="Where commands go. Hardware is intentionally not "
-                             "offered here yet; tune in sim first.")
+    # The backend and hardware flags are shared with webcam_demo and
+    # manus_teleop rather than redefined, so the safety defaults (disarmed,
+    # current cap, slew limit, homing precondition) are the same everywhere.
+    add_backend_arguments(parser, default="mujoco", include_mujoco=False)
     parser.add_argument("--mujoco-viewer", action="store_true",
                         help="Open the MuJoCo viewer alongside the browser UI.")
     parser.add_argument("--xml-path", default=None, help="Override the MJCF path.")
@@ -95,17 +103,6 @@ def _configure_logging(level: str, log_file: str | None) -> None:
     )
 
 
-def build_backend(args):
-    if args.backend == "print":
-        return PrintBackend()
-    return MujocoBackend(
-        xml_path=args.xml_path,
-        mujoco_repo=args.mujoco_repo,
-        render=args.mujoco_viewer,
-        steps_per_frame=max(1, round((1.0 / args.control_hz) / 0.002)),
-    )
-
-
 def build_state(args) -> TunerState:
     if args.preset:
         from midas_hand_retargeter import presets
@@ -130,7 +127,7 @@ def main(argv=None) -> int:
     retargeter = MidasHandRetargeter.create(
         mode=args.mode, mujoco_repo=args.mujoco_repo, tuning=state.profile
     )
-    backend = build_backend(args)
+    backend = build_backend(args, control_hz=args.control_hz)
 
     server = serve_in_background(state, host=args.bind, port=args.port)
     url = f"http://{args.bind}:{args.port}"

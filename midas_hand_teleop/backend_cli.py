@@ -25,7 +25,11 @@ logger = logging.getLogger(__name__)
 BACKEND_CHOICES = ("print", "mujoco", "hardware")
 DEFAULT_BACKEND = "print"
 
-DEFAULT_HARDWARE_PORT = "/dev/ttyUSB0"
+#: None, so MidasHand runs its own discovery: /dev/serial/by-id first, then
+#: ttyUSB*, scanning each for the configured motor IDs. Naming a port here
+#: instead would DISABLE that scan, and the adapter is not always ttyUSB0 --
+#: a tactile board on the same machine takes a ttyUSB slot too.
+DEFAULT_HARDWARE_PORT = None
 DEFAULT_HARDWARE_CURRENT_LIMIT = 350
 DEFAULT_HARDWARE_COMMAND_SCALE = 1.0
 DEFAULT_HARDWARE_MAX_STEP_RAD = 0.15
@@ -71,7 +75,10 @@ def add_backend_arguments(
     )
     hardware.add_argument("--hardware-config", default=None,
                           help="Calibration config (default: ~/.midas_hand/config.yaml).")
-    hardware.add_argument("--hardware-port", default=DEFAULT_HARDWARE_PORT)
+    hardware.add_argument(
+        "--hardware-port", default=DEFAULT_HARDWARE_PORT,
+        help="Serial port. Default: auto-discover, the same way homing does.",
+    )
     hardware.add_argument("--hardware-baudrate", type=int, default=None)
     hardware.add_argument("--hardware-current-limit", type=int,
                           default=DEFAULT_HARDWARE_CURRENT_LIMIT,
@@ -147,7 +154,36 @@ def build_backend(args, *, control_hz: float | None = None):
         )
     if args.backend == "hardware":
         check_hardware_preconditions(args)
-        return HardwareBackend(
+        try:
+            return _build_hardware_backend(args)
+        except OSError as exc:
+            # The raw error is a serial traceback ~20 frames deep. What the
+            # operator needs is the checklist, so trade the trace for that.
+            raise SystemExit(
+                f"Could not reach the MIDAS hand: {exc}\n"
+                f"{_serial_port_hint()}\n"
+                "Check, in order: the hand is powered, the U2D2 is plugged in, "
+                "and `python -m midas_hand_api --home` still works. Pass "
+                "--hardware-port to name a port explicitly."
+            ) from exc
+    raise ValueError(f"Unsupported backend: {args.backend}")
+
+
+def _serial_port_hint() -> str:
+    """What the discovery would actually find right now."""
+
+    try:
+        from midas_hand_api.hand import discover_ports
+    except ImportError:
+        return "Could not import midas_hand_api to list serial ports."
+    ports = discover_ports()
+    if not ports:
+        return "No serial ports are present at all — nothing is plugged in."
+    return "Serial ports currently present: " + ", ".join(ports)
+
+
+def _build_hardware_backend(args):
+    return HardwareBackend(
             configure=args.configure_hardware,
             config_path=args.hardware_config,
             port=args.hardware_port,
@@ -159,4 +195,3 @@ def build_backend(args, *, control_hz: float | None = None):
             interpolation_alpha=args.hardware_interpolation_alpha,
             start_armed=getattr(args, "start_armed", False),
         )
-    raise ValueError(f"Unsupported backend: {args.backend}")
