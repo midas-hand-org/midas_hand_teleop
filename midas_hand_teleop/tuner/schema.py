@@ -14,7 +14,13 @@ from __future__ import annotations
 from dataclasses import fields as dataclass_fields
 
 from midas_hand_retargeter.model import MIDAS_RIGHT_HAND, HandModel
-from midas_hand_retargeter.params import FingerParams, RetargetProfile, ThumbParams
+from midas_hand_retargeter.params import (
+    MODE_SECTIONS,
+    DexPilotParams,
+    FingerParams,
+    RetargetProfile,
+    ThumbParams,
+)
 
 #: UI slider bounds for scalar knobs that are not joint ranges.
 #: (minimum, maximum, step). Chosen to bracket useful tuning, not to be limits.
@@ -38,6 +44,15 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
     "cmc_roll_gain": (0.0, 3.0, 0.01),
     "cmc_roll_span": (0.05, 1.5, 0.01),
     "cmc_roll_deadzone": (0.0, 0.4, 0.005),
+    # DexPilot solver knobs.
+    "scaling_factor": (0.5, 2.5, 0.01),
+    "huber_delta": (0.005, 0.15, 0.005),
+    "norm_delta": (0.0, 0.05, 0.0005),
+    "project_dist": (0.005, 0.10, 0.001),
+    "escape_dist": (0.01, 0.15, 0.001),
+    "eta1": (0.0, 0.05, 0.0005),
+    "eta2": (0.0, 0.10, 0.001),
+    "low_pass_alpha": (0.05, 1.0, 0.01),
 }
 
 #: Which joint's limits bound each ``*_range`` field. ``{finger}`` is filled in.
@@ -64,6 +79,9 @@ BASIC_FIELDS = {
     "dip_range",
     "cmc_side_gain",
     "cmc_roll_gain",
+    "scaling_factor",
+    "project_dist",
+    "eta1",
 }
 
 #: Short help shown under each control.
@@ -99,9 +117,39 @@ HELP: dict[str, str] = {
     "cmc_roll_range": "Commanded limits for thumb opposition.",
     "cmc_roll_span": "Out-of-plane angle spanning neutral to full opposition.",
     "cmc_roll_deadzone": "Opposition angle ignored around neutral.",
+    # DexPilot.
+    "scaling_factor": "Your hand size relative to the robot's. THE key knob in "
+    "this mode — the analytic map ignores hand size entirely, this one does not. "
+    "Too small and the fingers over-close; too large and they never reach.",
+    "huber_delta": "Error width (m) below which tracking is quadratic. Smaller "
+    "chases small errors harder but is jitterier.",
+    "norm_delta": "Temporal regularizer: how strongly each solve is anchored to "
+    "the previous one. Larger is smoother but laggier.",
+    "project_dist": "Fingertip gap (m) at which a pair is treated as trying to "
+    "touch, snapping it to eta. This is what makes pinches land instead of hover.",
+    "escape_dist": "Gap (m) at which a snapped pair releases. Must exceed "
+    "project_dist; the difference is hysteresis against chatter.",
+    "eta1": "Target gap (m) for thumb-to-finger pairs once snapped.",
+    "eta2": "Target gap (m) for finger-to-finger pairs once snapped.",
+    "low_pass_alpha": "Solver-side low-pass. 1.0 = off.",
 }
 
-SECTIONS = ("thumb", "index", "middle", "ring")
+SECTIONS = ("thumb", "index", "middle", "ring", "dexpilot")
+
+SECTION_PARAMS: dict[str, type] = {
+    "thumb": ThumbParams,
+    "index": FingerParams,
+    "middle": FingerParams,
+    "ring": FingerParams,
+    "dexpilot": DexPilotParams,
+}
+
+#: Shown when a mode reads none of the sections the UI can edit.
+_MODE_NOTES = {
+    "vector": "mode=vector is the pure palm-rooted optimizer. It exposes no "
+              "tunable parameters here — switch to dexpilot to tune the solver, "
+              "or analytic to tune per-finger response.",
+}
 
 
 def _describe_field(section: str, field, model: HandModel) -> dict:
@@ -126,22 +174,33 @@ def _describe_field(section: str, field, model: HandModel) -> dict:
     return entry
 
 
-def build_schema(model: HandModel = MIDAS_RIGHT_HAND) -> dict:
-    """Full UI description: sections, controls, defaults and joint limits."""
+def build_schema(
+    model: HandModel = MIDAS_RIGHT_HAND, mode: str = "analytic"
+) -> dict:
+    """UI description for one retargeting mode.
+
+    Only the sections the mode actually reads are returned. A slider that
+    silently does nothing is the worst thing a tuning tool can offer — it is
+    how ~20 dead CLI flags accumulated in webcam_demo — so the per-finger
+    controls are simply absent in dexpilot mode, and vice versa.
+    """
 
     defaults = RetargetProfile()
+    active = MODE_SECTIONS.get(mode, MODE_SECTIONS["analytic"])
     sections = []
     for section in SECTIONS:
-        params_cls = ThumbParams if section == "thumb" else FingerParams
+        if section not in active:
+            continue
         controls = [
             _describe_field(section, field, model)
-            for field in dataclass_fields(params_cls)
+            for field in dataclass_fields(SECTION_PARAMS[section])
         ]
-        sections.append(
-            {"name": section, "label": section.capitalize(), "controls": controls}
-        )
+        label = "Solver" if section == "dexpilot" else section.capitalize()
+        sections.append({"name": section, "label": label, "controls": controls})
 
     return {
+        "mode": mode,
+        "note": _MODE_NOTES.get(mode, ""),
         "sections": sections,
         "defaults": defaults.to_flat_dict(),
         "joints": [

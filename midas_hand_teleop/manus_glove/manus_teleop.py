@@ -73,12 +73,17 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from midas_hand_retargeter import MidasHandRetargeter
-from midas_hand_retargeter.config import ANALYTIC_MODE, VECTOR_MODE
+from midas_hand_retargeter.config import (
+    ANALYTIC_MODE,
+    DEXPILOT_MODE,
+    VECTOR_MODE,
+)
 from midas_hand_retargeter.constants import (
     ACTIVE_JOINT_NAMES,
     HARDWARE_MOTOR_JOINT_NAMES,
 )
 from midas_hand_retargeter.human import mediapipe_world_to_mano_landmarks
+from midas_hand_retargeter.postprocess import as_profile as tuning_profile
 from midas_hand_retargeter.postprocess import (
     finger_joint_targets_from_landmarks,
     thumb_joint_targets_from_landmarks,
@@ -236,6 +241,20 @@ def build_retargeter(
     geometric postprocess + neutral calibration + PIP-DIP coupling), so tuning
     here carries over to the real robot.
     """
+    if args.retarget == "dexpilot":
+        logger.info(
+            "DexPilot: optimizing 6 inter-fingertip vectors + 4 palm-rooted. "
+            "scaling_factor=%.2f is the load-bearing knob here — unlike the "
+            "analytic map, this mode is sensitive to your hand size.",
+            tuning_profile(tuning).dexpilot.scaling_factor,
+        )
+        return MidasHandRetargeter.create(
+            mode=DEXPILOT_MODE,
+            mujoco_repo=args.mujoco_repo,
+            coupling_mode=args.coupling_mode,
+            tuning=tuning,
+        )
+
     if args.retarget != "full":
         if args.calibrate_delay > 0:
             logger.warning("--calibrate-delay needs --retarget full; ignoring it.")
@@ -368,6 +387,15 @@ def run(args: argparse.Namespace) -> None:
             return landmarks_to_joint_targets(
                 keypoints, tuning, mano_frame=args.mano_frame, side=args.side
             )
+        # DexPilot compares 3D vectors (palm->tip and tip->tip) against the
+        # robot's own frame, so it is orientation-sensitive in a way nothing
+        # else here is. The MANO frame is a different convention, and rotating
+        # into it points every target the wrong way — measured: the solver
+        # stops curling entirely (index_pip 0.000 instead of -0.23). So feed
+        # dexpilot the landmarks as published.
+        if retargeter.config.mode == DEXPILOT_MODE:
+            return dict(retargeter.retarget_landmarks(keypoints).active_joint_positions)
+
         # Full retargeter: feed MANO-frame landmarks (the vector optimizer needs a
         # consistent frame), then read the 13 active joints from the result.
         mano = mediapipe_world_to_mano_landmarks(keypoints, hand_type=hand_type)
@@ -546,10 +574,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--retarget",
-        choices=["full", "geometric"],
+        choices=["full", "geometric", "dexpilot"],
         default="full",
         help="full = MidasHandRetargeter (optimizer + postprocess + neutral + "
-        "coupling, same as webcam/hardware); geometric = lightweight direct map.",
+        "coupling, same as webcam/hardware); geometric = lightweight direct map; "
+        "dexpilot = optimizer over inter-fingertip vectors, which is the only "
+        "mode that controls where the fingertips sit relative to each other.",
     )
     parser.add_argument(
         "--scaling-factor",

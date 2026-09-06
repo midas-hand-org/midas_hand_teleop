@@ -90,7 +90,9 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
             if path.startswith("/static/"):
                 return self._serve_static(path[len("/static/"):])
             if path == "/api/schema":
-                return self._send_json(build_schema())
+                # Mode-specific: the browser must not render controls the
+                # running mode ignores.
+                return self._send_json(build_schema(mode=self.state.loop.mode))
             if path == "/api/profile":
                 return self._send_json(self._profile_payload())
             if path == "/api/telemetry":

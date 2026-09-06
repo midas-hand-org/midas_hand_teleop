@@ -55,9 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mujoco-repo", default=None,
                         help="Path to midas_hand_mujoco, if not auto-discovered.")
 
-    parser.add_argument("--mode", default=ANALYTIC_MODE, choices=list(SUPPORTED_RETARGET_MODES),
-                        help="Retargeting mode (default: analytic — the only one "
-                             "where every slider is guaranteed live).")
+    parser.add_argument(
+        "--mode", default=ANALYTIC_MODE, choices=list(SUPPORTED_RETARGET_MODES),
+        help="Retargeting mode (default: analytic). Use 'dexpilot' to tune the "
+             "optimizer that controls fingertip positions relative to each "
+             "other — the thing the analytic map structurally cannot do. The "
+             "UI shows only the controls the chosen mode actually reads.",
+    )
     parser.add_argument("--profile", default="glove", choices=sorted(PROFILES),
                         help="Starting tuning profile (default: glove).")
     parser.add_argument("--preset", default=None,
@@ -121,6 +125,7 @@ def main(argv=None) -> int:
     _configure_logging(args.log_level, args.log_file)
 
     state = build_state(args)
+    state.loop.mode = args.mode
     retargeter = MidasHandRetargeter.create(
         mode=args.mode, mujoco_repo=args.mujoco_repo, tuning=state.profile
     )

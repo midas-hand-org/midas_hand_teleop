@@ -165,3 +165,36 @@ def test_telemetry_reports_staleness_rather_than_lying(server):
     glove = get(base, "/api/telemetry")["glove"]
     assert glove["stale"] is True
     assert glove["latency_ms"] == 12.0, "the number is kept, but flagged stale"
+
+
+def test_schema_is_mode_aware():
+    """The UI must not render controls the running mode ignores.
+
+    In dexpilot mode the per-finger analytic parameters do nothing at all, and
+    vice versa. Showing them anyway is how ~20 dead CLI flags accumulated in
+    webcam_demo.
+    """
+
+    analytic = build_schema(mode="analytic")
+    dexpilot = build_schema(mode="dexpilot")
+    vector = build_schema(mode="vector")
+
+    assert [s["name"] for s in analytic["sections"]] == [
+        "thumb", "index", "middle", "ring",
+    ]
+    assert [s["name"] for s in dexpilot["sections"]] == ["dexpilot"]
+    assert vector["sections"] == []
+    assert vector["note"], "a mode with no tunables must say so, not look broken"
+
+
+def test_dexpilot_schema_leads_with_scaling_factor():
+    """It is the load-bearing knob, so it must not be hidden behind 'advanced'."""
+
+    controls = {
+        c["name"]: c
+        for s in build_schema(mode="dexpilot")["sections"]
+        for c in s["controls"]
+    }
+    assert controls["scaling_factor"]["advanced"] is False
+    assert "hand size" in controls["scaling_factor"]["help"].lower()
+    assert len(controls) == 9
