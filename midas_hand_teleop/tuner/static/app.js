@@ -307,6 +307,16 @@ async function main() {
       renderControls();
     });
   }
+  // Hand-size calibration only exists for the solver mode that uses it.
+  const scaleMode = state.schema.mode === "dexpilot";
+  $("cal-scale-row").hidden = !scaleMode;
+  $("cal-scale-hint").hidden = !scaleMode;
+  $("cal-scale").addEventListener("click", async () => {
+    await api("/api/calibrate", { action: "scale" });
+    const profile = await api("/api/profile");
+    state.params = profile.parameters;
+    renderControls();
+  });
   $("cal-capture").addEventListener("click", () => api("/api/calibrate", { action: "capture" }));
   $("cal-clear").addEventListener("click", () => api("/api/calibrate", { action: "clear" }));
   $("preset-save").addEventListener("click", async () => {

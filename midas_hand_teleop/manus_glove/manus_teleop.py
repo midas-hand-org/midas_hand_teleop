@@ -68,6 +68,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import select
+import sys
 import time
 from dataclasses import dataclass, replace
 
@@ -234,6 +236,30 @@ def resolve_filter_alpha(
             )
         return args.filter_alpha
     return 1.0 if full_mode else tuning.finger_smoothing_alpha
+
+
+def _poll_console_key() -> str | None:
+    """Non-blocking read of one keypress line from a terminal.
+
+    The webcam path has had on-demand recalibration ('c' to capture neutral)
+    since the beginning, because it owns an OpenCV window that can take key
+    events. The glove path had only a blind --calibrate-delay countdown at
+    startup, so a drifting neutral meant restarting the session. This gives it
+    the same control from the terminal.
+
+    Returns None when there is no TTY (piped or systemd runs) or nothing typed.
+    """
+
+    if not sys.stdin or not sys.stdin.isatty():
+        return None
+    try:
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+    except (OSError, ValueError):
+        return None
+    if not ready:
+        return None
+    line = sys.stdin.readline().strip().lower()
+    return line[0] if line else None
 
 
 def build_retargeter(
@@ -500,6 +526,11 @@ def run(args: argparse.Namespace) -> None:
 
     next_tick = time.monotonic()
     try:
+        if sys.stdin and sys.stdin.isatty() and retargeter is not None:
+            keys = "c = capture neutral, r = clear, q = quit"
+            if args.retarget == "dexpilot":
+                keys = "c = capture neutral, s = calibrate hand size, r = clear, q = quit"
+            logger.info("Type a key then Enter: %s", keys)
         has_viewer = getattr(backend, "viewer", None) is not None
         if has_viewer:
             logger.info(
@@ -515,6 +546,27 @@ def run(args: argparse.Namespace) -> None:
                 break
             if has_viewer and not viewer_running():
                 break
+            key = _poll_console_key()
+            if key and retargeter is not None:
+                if key == "c":
+                    try:
+                        retargeter.calibrate_neutral_from_last_frame()
+                        logger.info("Captured neutral pose — this is now MIDAS zero.")
+                    except RuntimeError as exc:
+                        logger.warning("Neutral calibration skipped: %s", exc)
+                elif key == "r":
+                    retargeter.clear_neutral_offsets()
+                    logger.info("Cleared neutral calibration.")
+                elif key == "s" and retargeter.config.mode == DEXPILOT_MODE:
+                    try:
+                        scaling = retargeter.calibrate_scaling_from_landmarks()
+                        logger.info("Calibrated hand scale to %.3f", scaling)
+                    except RuntimeError as exc:
+                        logger.warning("Scale calibration skipped: %s", exc)
+                elif key == "q":
+                    logger.info("Quit requested.")
+                    break
+
             update_control()
             # Send every tick (latest control, held between glove frames) so the
             # sim keeps stepping and the viewer stays synced at a steady rate.

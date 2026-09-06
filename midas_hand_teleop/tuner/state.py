@@ -138,14 +138,17 @@ class TunerState:
             self._messages.append(message)
 
     # --- calibration handshake -----------------------------------------
+    #: 'capture' zero pose, 'clear' it, or 'scale' the operator's hand size.
+    CALIBRATION_ACTIONS = ("capture", "clear", "scale")
+
     def request_calibration(self, action: str) -> None:
-        """Queue 'capture' or 'clear'; the loop performs it on its next frame.
+        """Queue a calibration action; the loop performs it on its next frame.
 
         Done as a request rather than a direct call so calibration always
         happens on the control thread, holding a real landmark frame.
         """
 
-        if action not in ("capture", "clear"):
+        if action not in self.CALIBRATION_ACTIONS:
             raise ValueError(f"Unknown calibration action {action!r}")
         with self._lock:
             self._calibration_request = action

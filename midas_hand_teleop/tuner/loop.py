@@ -110,6 +110,15 @@ class TunerLoop:
             self.retargeter.clear_neutral_offsets()
             self.state.note("neutral calibration cleared")
             return
+        if request == "scale":
+            try:
+                scaling = self.retargeter.calibrate_scaling_from_landmarks()
+                # Mirror it into the shared store so the slider tracks it.
+                self.state.store.apply({"dexpilot.scaling_factor": scaling})
+                self.state.note(f"calibrated hand scale to {scaling:.3f}")
+            except (RuntimeError, KeyError) as exc:
+                self.state.note(f"scale calibration failed: {exc}")
+            return
         try:
             captured = self.retargeter.calibrate_neutral_from_last_frame()
             self.state.note(f"captured neutral on {len(captured)} joints")
