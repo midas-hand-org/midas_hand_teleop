@@ -48,12 +48,13 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
     "scaling_factor": (0.5, 2.5, 0.01),
     "huber_delta": (0.005, 0.15, 0.005),
     "norm_delta": (0.0, 0.05, 0.0005),
-    "project_dist": (0.005, 0.10, 0.001),
+    "project_dist": (0.0, 0.10, 0.001),   # 0 disables pinch snapping entirely
     "escape_dist": (0.01, 0.15, 0.001),
     "eta1": (0.0, 0.05, 0.0005),
     "eta2": (0.0, 0.10, 0.001),
     "low_pass_alpha": (0.05, 1.0, 0.01),
     "thumb_vector_scale": (0.8, 1.6, 0.01),
+    "spread_scale": (0.8, 1.6, 0.01),
 }
 
 #: Which joint's limits bound each ``*_range`` field. ``{finger}`` is filled in.
@@ -81,6 +82,7 @@ BASIC_FIELDS = {
     "cmc_side_gain",
     "cmc_roll_gain",
     "scaling_factor",
+    "spread_scale",
     "project_dist",
     "eta1",
 }
@@ -127,12 +129,20 @@ HELP: dict[str, str] = {
     "norm_delta": "Temporal regularizer: how strongly each solve is anchored to "
     "the previous one. Larger is smoother but laggier.",
     "project_dist": "Fingertip gap (m) at which a pair is treated as trying to "
-    "touch, snapping it to eta. This is what makes pinches land instead of hover.",
+    "touch, snapping it to eta. This is what makes pinches land instead of "
+    "hover — and also what makes fingertips STICK together: once snapped, a "
+    "pair only releases past escape_dist, so the robot holds a 1 mm gap while "
+    "your own fingers open to 48 mm. Set to 0 to disable snapping entirely.",
     "escape_dist": "Gap (m) at which a snapped pair releases. Must exceed "
     "project_dist; the difference is hysteresis against chatter.",
     "eta1": "Target gap (m) for thumb-to-finger pairs once snapped.",
     "eta2": "Target gap (m) for finger-to-finger pairs once snapped.",
     "low_pass_alpha": "Solver-side low-pass. 1.0 = off.",
+    "spread_scale": "How far apart the fingers are, independently of how far "
+    "they reach. The MIDAS fingertips span 61 mm at rest against ~48 mm for a "
+    "scaled human hand, so without this the solver swings each finger sideways "
+    "to reach targets inside its own knuckle spacing. Set by 'Calibrate hand "
+    "size'; 1.0 = off.",
     "thumb_vector_scale": "Extra reach given to the thumb's own targets. 1.0 = "
     "off, and off is the default: the thumb-root rebase already removes most of "
     "the MIDAS thumb's proportional excess. Raise toward ~1.15 for a straighter "
