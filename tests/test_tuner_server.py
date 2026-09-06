@@ -198,3 +198,37 @@ def test_dexpilot_schema_leads_with_scaling_factor():
     assert controls["scaling_factor"]["advanced"] is False
     assert "hand size" in controls["scaling_factor"]["help"].lower()
     assert len(controls) == 9
+
+
+@pytest.mark.parametrize("mode", ["analytic", "dexpilot", "refine", "vector"])
+def test_every_mode_yields_a_renderable_schema(mode):
+    """The page picks its first tab from the schema, so that contract matters.
+
+    The UI used to default its selected tab to "index", which does not exist
+    in dexpilot mode — the page died with "Cannot read properties of undefined
+    (reading 'controls')". Either there is a first section to select, or there
+    is a note explaining why there is nothing to tune.
+    """
+
+    schema = build_schema(mode=mode)
+    assert schema["mode"] == mode
+
+    if schema["sections"]:
+        first = schema["sections"][0]
+        assert first["name"] and first["controls"], "a section must be renderable"
+        for section in schema["sections"]:
+            for control in section["controls"]:
+                assert control["path"].startswith(f"{section['name']}.")
+                assert control["kind"] in {"scalar", "range", "bool"}
+    else:
+        assert schema["note"], "an empty schema must explain itself, not look broken"
+
+
+def test_defaults_cover_every_control_the_ui_can_render():
+    """The page reads defaults[path] to mark a control as modified."""
+
+    for mode in ("analytic", "dexpilot"):
+        schema = build_schema(mode=mode)
+        for section in schema["sections"]:
+            for control in section["controls"]:
+                assert control["path"] in schema["defaults"], control["path"]

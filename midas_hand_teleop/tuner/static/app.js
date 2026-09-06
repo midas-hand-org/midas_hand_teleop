@@ -9,7 +9,7 @@ const state = {
   schema: null,
   params: {},       // dotted path -> value
   defaults: {},
-  section: "index",
+  section: null,      // chosen from the schema; modes expose different sections
   telemetry: null,
   neutral: {},
 };
@@ -135,6 +135,16 @@ function renderControls() {
   const advanced = $("show-advanced").checked;
   const section = state.schema.sections.find((s) => s.name === state.section);
   host.textContent = "";
+  if (!section) {
+    // e.g. mode=vector, which exposes nothing tunable. Say so rather than
+    // rendering an empty panel that looks broken.
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent =
+      state.schema.note || "This mode exposes no tunable parameters.";
+    host.appendChild(note);
+    return;
+  }
   for (const control of section.controls) {
     if (control.advanced && !advanced) continue;
     if (control.kind === "bool") host.appendChild(makeBool(control));
@@ -198,7 +208,8 @@ function renderStatus() {
 function renderLive() {
   const frame = state.telemetry;
   if (!frame || !frame.commanded) return;
-  const joints = FINGER_JOINTS[state.section] || [];
+  // Solver modes (dexpilot) have no per-finger tab, so show all 13 joints.
+  const joints = FINGER_JOINTS[state.section] || Object.keys(frame.commanded).sort();
   const host = $("joints");
   host.textContent = "";
 
@@ -235,11 +246,15 @@ function renderLive() {
     marker.style.left = `${Math.max(0, Math.min(100, ((value - limit.lower) / span) * 100))}%`;
   });
 
-  const inter = (frame.intermediates || {})[state.section] || {};
-  $("intermediates").innerHTML = Object.entries(inter)
+  const all = frame.intermediates || {};
+  const inter = FINGER_JOINTS[state.section]
+    ? Object.entries(all[state.section] || {})
+    : Object.entries(all).flatMap(([digit, values]) =>
+        Object.entries(values || {}).map(([k, v]) => [`${digit}.${k}`, v]));
+  $("intermediates").innerHTML = inter
     .map(([k, v]) => `<div class="kv"><span>${k}</span><span>${
       typeof v === "number" ? v.toFixed(4) : v}</span></div>`)
-    .join("") || `<div class="hint">no intermediates for this digit</div>`;
+    .join("") || `<div class="hint">no intermediates available</div>`;
 
   $("log").innerHTML = (frame.messages || []).slice(-6).reverse()
     .map((m) => `<li>${m}</li>`).join("");
@@ -273,6 +288,12 @@ async function main() {
   jointLimits = Object.fromEntries(state.schema.joints.map((j) => [j.name, j]));
   const profile = await api("/api/profile");
   state.params = profile.parameters;
+  // The default tab used to be hardcoded to "index", which does not exist in
+  // dexpilot mode — the schema is mode-specific, so take the first section it
+  // actually offers.
+  state.section = state.schema.sections.length
+    ? state.schema.sections[0].name
+    : null;
 
   renderTabs();
   renderControls();
