@@ -274,3 +274,32 @@ def test_loading_a_preset_cannot_escape_the_preset_directory(server):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
             post(base, "/api/presets/load", {"name": name})
         assert excinfo.value.code == 400, name
+
+
+def test_saving_a_preset_captures_the_live_zero_pose(server, tmp_path):
+    """The browser is only ever TOLD about a neutral on a preset load, so
+    echoing its copy back wrote {} over a freshly captured zero pose."""
+
+    state, base = server
+    state.neutral_offsets = {"index_pip_joint": -0.12, "thumb_mcp_joint": -0.34}
+    post(base, "/api/presets/save", {"name": "zero"})
+
+    saved = json.loads((tmp_path / "zero.json").read_text())
+    assert saved["neutral_offsets"] == {
+        "index_pip_joint": -0.12, "thumb_mcp_joint": -0.34
+    }
+
+
+def test_loading_a_preset_queues_its_zero_pose_for_the_loop(server, tmp_path):
+    """A preset is a complete artifact, so its calibration must be installed,
+    not merely displayed. The loop applies it; the server may not touch the
+    retargeter."""
+
+    state, base = server
+    state.neutral_offsets = {"index_pip_joint": -0.12}
+    post(base, "/api/presets/save", {"name": "zero"})
+    state.neutral_offsets = {}
+
+    post(base, "/api/presets/load", {"name": "zero"})
+    assert state.take_neutral_offsets() == {"index_pip_joint": -0.12}
+    assert state.take_neutral_offsets() is None, "consumed exactly once"

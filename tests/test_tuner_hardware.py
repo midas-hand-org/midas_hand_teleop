@@ -197,3 +197,32 @@ def test_a_non_finite_target_is_never_commanded():
     result = type("R", (), {"hardware_motor_positions": np.full(13, np.nan)})()
     with pytest.raises(ValueError, match="non-finite"):
         backend._prepare_target(result)
+
+
+def test_watchdog_disarms_when_the_browser_goes_away(loop_factory):
+    """The Arm button lives in a web page. A closed tab, a slept laptop or lost
+    wifi never reaches the loop, so an armed hand would keep tracking with
+    nobody able to stop it short of a terminal."""
+
+    state, loop = loop_factory(FakeHardware(), client_timeout_s=1.0)
+    state.loop.armed = True
+    loop._service_arming()
+
+    state.snapshot()                      # a browser polls
+    loop._service_client_watchdog()
+    assert state.loop.armed is True
+
+    state._last_client_poll -= 5.0        # ...and then stops
+    loop._service_client_watchdog()
+    assert state.loop.armed is False
+    assert loop.backend.disarm_calls == 1
+
+
+def test_watchdog_leaves_a_headless_run_alone(loop_factory):
+    """--start-armed with no browser is a deliberate choice, not a lost tab."""
+
+    state, loop = loop_factory(FakeHardware(), client_timeout_s=1.0)
+    state.loop.armed = True
+    loop._service_arming()
+    loop._service_client_watchdog()
+    assert state.loop.armed is True, "no browser has EVER polled; nothing was lost"

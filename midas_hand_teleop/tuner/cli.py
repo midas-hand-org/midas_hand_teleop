@@ -34,7 +34,12 @@ from midas_hand_retargeter.store import ProfileStore
 from midas_hand_retargeter.tuning import PROFILES, tuning_for_source
 
 from ..backend_cli import add_backend_arguments, build_backend
-from ..shutdown import close_quietly, exit_without_atexit, protected_shutdown
+from ..shutdown import (
+    close_quietly,
+    exit_without_atexit,
+    protected_shutdown,
+    sigterm_as_interrupt,
+)
 from .loop import LoopConfig, TunerLoop
 from .server import serve_in_background
 from .state import TunerState
@@ -104,18 +109,26 @@ def _configure_logging(level: str, log_file: str | None) -> None:
 
 
 def build_state(args) -> TunerState:
+    # Filled by the preset branch, then queued onto the state below so the
+    # control loop installs it on its first frame -- the same path the browser
+    # uses, rather than a second one that could drift from it.
+    state_neutral: dict[str, float] = {}
     if args.preset:
         from midas_hand_retargeter import presets
 
         profile, neutral = presets.load(args.preset)
         logger.info("Loaded preset %s (%d neutral offsets)", args.preset, len(neutral))
+        state_neutral.update(neutral)
     else:
         profile = RetargetProfile.from_legacy_tuning(tuning_for_source(args.profile))
         profile = RetargetProfile(
             index=profile.index, middle=profile.middle, ring=profile.ring,
             thumb=profile.thumb, name=args.profile, source=args.profile,
         )
-    return TunerState(store=ProfileStore(profile))
+    state = TunerState(store=ProfileStore(profile))
+    if state_neutral:
+        state.request_neutral_offsets(state_neutral)
+    return state
 
 
 def main(argv=None) -> int:
@@ -140,8 +153,19 @@ def main(argv=None) -> int:
         LoopConfig(side=args.side, host=args.host, control_hz=args.control_hz,
                    duration_s=args.duration, start_proxy=not args.no_proxy),
     )
+    def drop_torque():
+        """The one thing that must happen on every exit path."""
+
+        disarm = getattr(backend, "disarm", None)
+        if callable(disarm):
+            disarm()
+
     try:
-        loop.run()
+        # SIGTERM would otherwise kill the process outright, skipping both the
+        # finally below and midas_hand_api's atexit torque-off. `kill` and
+        # `pkill -f` are how the runbook says to stop these loops.
+        with sigterm_as_interrupt(logger):
+            loop.run()
     except KeyboardInterrupt:
         logger.info("Stopping.")
     finally:
@@ -149,7 +173,7 @@ def main(argv=None) -> int:
         # A second Ctrl-C must not abort this block. If it did, the MuJoCo
         # viewer would never close and the process would then deadlock in
         # glfw.terminate() at interpreter exit, unkillable by Ctrl-C.
-        with protected_shutdown(logger):
+        with protected_shutdown(logger, before_force_exit=drop_torque):
             # Backend first, deliberately: it owns the GUI, and the GLFW
             # render loop has to be stopped before atexit tries to terminate
             # the library underneath it.

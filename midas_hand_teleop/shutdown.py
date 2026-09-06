@@ -38,12 +38,23 @@ SIGINT_EXIT_CODE = 130
 
 
 @contextlib.contextmanager
-def protected_shutdown(logger: logging.Logger, *, exit_code: int = SIGINT_EXIT_CODE):
+def protected_shutdown(
+    logger: logging.Logger,
+    *,
+    exit_code: int = SIGINT_EXIT_CODE,
+    before_force_exit=None,
+):
     """Run a cleanup block that Ctrl-C cannot interrupt halfway.
 
     The first Ctrl-C inside the block is absorbed with a hint; a second one
     force-exits immediately rather than letting a stuck GUI teardown hold the
     terminal hostage.
+
+    ``before_force_exit`` runs on that force path, before ``os._exit``. Pass
+    the thing that MUST happen even when the operator is hammering Ctrl-C --
+    dropping motor torque. ``os._exit`` skips atexit, which is where
+    ``midas_hand_api`` registers its own torque-off, so without this an
+    impatient operator can leave a hand energised.
 
     Only effective on the main thread — :func:`signal.signal` raises anywhere
     else — so it degrades to a no-op rather than failing.
@@ -62,6 +73,11 @@ def protected_shutdown(logger: logging.Logger, *, exit_code: int = SIGINT_EXIT_C
             logger.warning("Shutting down — press Ctrl-C again to force quit.")
         else:
             logger.warning("Forcing exit; skipping remaining cleanup.")
+            if before_force_exit is not None:
+                # Suppress everything: this is the last chance to drop torque,
+                # and a failure here must not stop the exit.
+                with contextlib.suppress(BaseException):
+                    before_force_exit()
             # os._exit, not sys.exit: this must not run atexit handlers, since
             # glfw.terminate is registered there and is what hangs.
             os._exit(exit_code)
@@ -122,3 +138,36 @@ def exit_without_atexit(logger: logging.Logger, code: int = 0) -> None:
         with contextlib.suppress(Exception):
             stream.flush()
     os._exit(code)
+
+
+@contextlib.contextmanager
+def sigterm_as_interrupt(logger: logging.Logger):
+    """Make SIGTERM take the same path as Ctrl-C.
+
+    Python's default SIGTERM action terminates the process outright: no
+    ``finally``, no ``atexit``, so motor torque stays on. That matters because
+    ``kill`` is the documented way to stop these loops, and ``pkill -f`` is in
+    the runbook. Raising KeyboardInterrupt instead routes it through the
+    cleanup that already exists.
+
+    Main thread only, like every ``signal.signal`` caller; a no-op elsewhere.
+    """
+
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def on_terminate(signum, frame):  # noqa: ARG001 - signal handler signature
+        logger.warning("SIGTERM received — shutting down.")
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, on_terminate)
+    except (ValueError, OSError):  # pragma: no cover - non-main thread
+        yield
+        return
+    try:
+        yield
+    finally:
+        with contextlib.suppress(ValueError, OSError, TypeError):
+            signal.signal(signal.SIGTERM, previous)

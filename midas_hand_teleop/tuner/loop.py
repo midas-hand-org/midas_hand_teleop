@@ -44,6 +44,11 @@ class LoopConfig:
     #: last frame forever, which on hardware means leaning on whatever the hand
     #: is holding until someone notices. 0 disables it.
     stale_timeout_s: float = 0.5
+    #: Disarm if no browser has polled for this long. The arm switch lives in a
+    #: web page, so a closed tab, a slept laptop or lost wifi must not leave a
+    #: hand tracking. Only trips once a browser HAS been seen, so a deliberate
+    #: headless --start-armed run is left alone. 0 disables it.
+    client_timeout_s: float = 3.0
 
 
 class TunerLoop:
@@ -112,6 +117,13 @@ class TunerLoop:
 
     # --- calibration ---------------------------------------------------
     def _service_calibration(self) -> None:
+        pending = self.state.take_neutral_offsets()
+        if pending is not None:
+            # A preset's saved zero pose. Applied here rather than at load time
+            # because the retargeter belongs to this thread.
+            self.retargeter.set_neutral_offsets(pending)
+            self.state.note(f"applied neutral calibration on {len(pending)} joints")
+
         request = self.state.take_calibration_request()
         if request is None:
             return
@@ -162,6 +174,32 @@ class TunerLoop:
         self._armed_applied = wanted
         self.state.note("hardware ARMED" if wanted else "hardware disarmed")
 
+    def _service_client_watchdog(self) -> None:
+        """Disarm if no browser is watching.
+
+        The Arm button is in a web page, and closing the tab, sleeping the
+        laptop or losing wifi does not reach the loop -- so an armed hand would
+        keep tracking with nobody able to stop it short of a terminal. The UI
+        polls continuously while open, so silence means nobody is looking.
+        """
+
+        timeout = self.config.client_timeout_s
+        if timeout <= 0 or not self.state.loop.hardware_available:
+            return
+        if not (self.state.loop.armed or self._armed_applied):
+            return
+        age = self.state.seconds_since_client_poll()
+        if age <= timeout:
+            return
+        self.state.loop.armed = False
+        self._armed_applied = False
+        try:
+            self.backend.disarm()
+        except Exception:
+            logger.exception("Watchdog disarm failed")
+        logger.error("No browser has polled for %.1fs — disarmed.", age)
+        self.state.note(f"watchdog: no browser for {age:.1f}s, disarmed")
+
     def _service_deadman(self) -> None:
         """Disarm if the glove has gone quiet, and require a manual re-arm.
 
@@ -211,6 +249,14 @@ class TunerLoop:
             if landmarks is not None:
                 self._last_landmarks = landmarks
 
+            # Outside the landmark gate on purpose. A disarm request, and the
+            # deadman, must be honoured even when no glove frame has EVER
+            # arrived -- otherwise the one situation where you most want to
+            # drop torque is the one where the loop never looks.
+            self._service_arming()
+            self._service_deadman()
+            self._service_client_watchdog()
+
             if self._last_landmarks is not None:
                 # One profile read per frame; a concurrent UI edit lands on the
                 # next frame rather than halfway through this one.
@@ -221,8 +267,6 @@ class TunerLoop:
                 self.state.loop.retarget_ms = (time.perf_counter() - solve_start) * 1000.0
 
                 self._service_calibration()
-                self._service_arming()
-                self._service_deadman()
                 self._send(result)
                 self._publish(result, self._last_landmarks)
 
@@ -252,6 +296,7 @@ class TunerLoop:
         except Exception:  # a sim/hardware read must never kill the loop
             measured = {}
         debug = analytic_debug(landmarks, self.retargeter.profile)
+        self.state.neutral_offsets = dict(self.retargeter.neutral_joint_offsets)
         self.state.publish(
             commanded=result.active_joint_positions,
             measured=measured,

@@ -187,7 +187,8 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
             # version omitted dexpilot=, so every solver knob an operator tuned
             # was silently reset to defaults on save, under a "saved" message.
             replace(profile, name=name),
-            neutral_offsets=body.get("neutral_offsets") or {},
+            # From the live state, not the body: see TunerState.neutral_offsets.
+            neutral_offsets=dict(self.state.neutral_offsets),
         )
         self.state.note(f"saved preset {name}")
         self._send_json({"ok": True, "path": str(path)})
@@ -196,6 +197,9 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
         name = self._preset_name(body)
         profile, neutral = presets.load(Path(self.preset_dir) / f"{name}.json")
         self.state.store.set(profile)
+        # A preset is meant to be a complete, reproducible artifact, so its
+        # zero-pose calibration has to be installed too, not just displayed.
+        self.state.request_neutral_offsets(neutral)
         self.state.note(f"loaded preset {name}")
         self._send_json({**self._profile_payload(), "neutral_offsets": neutral})
 

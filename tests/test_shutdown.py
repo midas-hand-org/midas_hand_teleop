@@ -94,3 +94,53 @@ def test_second_interrupt_forces_exit():
     assert result.returncode == 130, result.stderr
     assert "NOT REACHED" not in result.stdout
     assert "force quit" in result.stderr
+
+
+def test_sigterm_becomes_a_keyboard_interrupt():
+    """Default SIGTERM kills the process outright: no finally, no atexit, so
+    motor torque stays on. `kill` and `pkill -f` are how the runbook stops
+    these loops, so it has to take the same path as Ctrl-C."""
+
+    import os
+    import signal
+
+    from midas_hand_teleop.shutdown import sigterm_as_interrupt
+
+    logger = logging.getLogger("test")
+    with pytest.raises(KeyboardInterrupt):
+        with sigterm_as_interrupt(logger):
+            os.kill(os.getpid(), signal.SIGTERM)
+
+
+def test_sigterm_handler_is_restored():
+    import signal
+
+    from midas_hand_teleop.shutdown import sigterm_as_interrupt
+
+    before = signal.getsignal(signal.SIGTERM)
+    with sigterm_as_interrupt(logging.getLogger("test")):
+        pass
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_force_exit_drops_torque_first(monkeypatch):
+    """os._exit skips atexit, which is where midas_hand_api's torque-off
+    lives, so an operator hammering Ctrl-C could leave a hand energised."""
+
+    import signal
+
+    from midas_hand_teleop import shutdown as shutdown_module
+
+    dropped = []
+    exited = []
+    monkeypatch.setattr(shutdown_module.os, "_exit", lambda code: exited.append(code))
+
+    with shutdown_module.protected_shutdown(
+        logging.getLogger("test"), before_force_exit=lambda: dropped.append(True)
+    ):
+        handler = signal.getsignal(signal.SIGINT)
+        handler(signal.SIGINT, None)   # first: absorbed
+        assert dropped == []
+        handler(signal.SIGINT, None)   # second: force quit
+    assert dropped == [True], "torque must be dropped before the force exit"
+    assert exited == [shutdown_module.SIGINT_EXIT_CODE]

@@ -11,7 +11,6 @@ const state = {
   defaults: {},
   section: null,      // chosen from the schema; modes expose different sections
   telemetry: null,
-  neutral: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -191,6 +190,9 @@ function renderStatus() {
        g.latency_ms == null ? "" : g.stale ? "warn" : g.latency_ms > 60 ? "warn" : "ok");
   chip("chip-loop", `loop ${l.rate_hz ?? 0} Hz · ${l.retarget_ms ?? 0} ms`);
   chip("chip-mode", `mode ${l.mode ?? "?"}`);
+  const neutral = Object.keys(frame.neutral_offsets ?? {}).length;
+  chip("chip-neutral", neutral ? `zero pose · ${neutral} joints` : "zero pose not set",
+       neutral ? "ok" : "");
   chip("chip-backend", `backend ${l.backend ?? "?"}${l.armed ? " · ARMED" : ""}`,
        l.armed ? "bad" : "");
 
@@ -323,7 +325,10 @@ async function main() {
     const name = $("preset-name").value.trim();
     if (!name) return showError("Enter a preset name first.");
     try {
-      await api("/api/presets/save", { name, neutral_offsets: state.neutral });
+      // The server takes the neutral calibration from the live loop state, not
+      // from here: the page is only ever told about one on a preset load, so
+      // echoing it back wrote {} over a freshly captured zero pose.
+      await api("/api/presets/save", { name });
       showError("");
       await refreshPresets();
     } catch (err) { showError(err.message); }
@@ -334,7 +339,6 @@ async function main() {
     try {
       const payload = await api("/api/presets/load", { name });
       state.params = payload.parameters;
-      state.neutral = payload.neutral_offsets || {};
       showError("");
       renderControls();
     } catch (err) { showError(err.message); }

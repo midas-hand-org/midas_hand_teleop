@@ -75,6 +75,12 @@ class TunerState:
     store: ProfileStore = field(default_factory=ProfileStore)
     glove: GloveStatus = field(default_factory=GloveStatus)
     loop: LoopStatus = field(default_factory=LoopStatus)
+    #: The retargeter's live neutral (zero-pose) calibration, republished each
+    #: frame by the loop. Saving a preset reads it from here rather than
+    #: trusting the browser to echo back what it was last told: the browser is
+    #: only ever told on a preset LOAD, so a freshly captured neutral was being
+    #: written out as {} under a "saved" message.
+    neutral_offsets: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -82,6 +88,11 @@ class TunerState:
         self._trace: deque[dict[str, Any]] = deque(maxlen=TRACE_LENGTH)
         self._version = 0
         self._calibration_request: str | None = None
+        self._pending_neutral: dict[str, float] | None = None
+        #: None until a browser has polled once. The watchdog only trips after
+        #: a client has been seen, so a deliberate headless --start-armed run
+        #: is not disarmed for the crime of having no browser.
+        self._last_client_poll: float | None = None
         self._messages: deque[str] = deque(maxlen=32)
 
     # --- parameters ----------------------------------------------------
@@ -109,6 +120,7 @@ class TunerState:
             "palm": palm or {},
             "glove": self.glove.to_dict(),
             "loop": self.loop.to_dict(),
+            "neutral_offsets": dict(self.neutral_offsets),
         }
         with self._lock:
             self._telemetry = frame
@@ -118,11 +130,23 @@ class TunerState:
             self._version += 1
 
     def snapshot(self) -> dict[str, Any]:
+        """Also the client heartbeat: the browser polls this continuously, so
+        silence here is how the loop learns the tab is gone."""
+
         with self._lock:
+            self._last_client_poll = time.monotonic()
             frame = dict(self._telemetry)
             frame["version"] = self._version
             frame["messages"] = list(self._messages)
             return frame
+
+    def seconds_since_client_poll(self) -> float:
+        """Seconds since a browser last polled, or 0.0 if none ever has."""
+
+        with self._lock:
+            if self._last_client_poll is None:
+                return 0.0
+            return time.monotonic() - self._last_client_poll
 
     def trace(self, joint: str) -> dict[str, list]:
         with self._lock:
@@ -157,3 +181,18 @@ class TunerState:
         with self._lock:
             request, self._calibration_request = self._calibration_request, None
             return request
+
+    def request_neutral_offsets(self, offsets) -> None:
+        """Ask the loop to install a neutral calibration, e.g. from a preset.
+
+        Queued rather than applied, for the same reason the calibration actions
+        are: the retargeter belongs to the control thread.
+        """
+
+        with self._lock:
+            self._pending_neutral = {str(k): float(v) for k, v in dict(offsets).items()}
+
+    def take_neutral_offsets(self):
+        with self._lock:
+            pending, self._pending_neutral = self._pending_neutral, None
+            return pending
