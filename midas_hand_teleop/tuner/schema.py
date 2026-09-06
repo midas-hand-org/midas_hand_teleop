@@ -55,6 +55,7 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
     "low_pass_alpha": (0.05, 1.0, 0.01),
     "thumb_vector_scale": (0.8, 1.6, 0.01),
     "spread_scale": (0.8, 1.6, 0.01),
+    "abduction_limit": (0.0, 0.60, 0.01),  # 0 locks the fingers parallel
 }
 
 #: Which joint's limits bound each ``*_range`` field. ``{finger}`` is filled in.
@@ -82,6 +83,7 @@ BASIC_FIELDS = {
     "cmc_side_gain",
     "cmc_roll_gain",
     "scaling_factor",
+    "abduction_limit",
     "spread_scale",
     "project_dist",
     "eta1",
@@ -139,10 +141,16 @@ HELP: dict[str, str] = {
     "eta2": "Target gap (m) for finger-to-finger pairs once snapped.",
     "low_pass_alpha": "Solver-side low-pass. 1.0 = off.",
     "spread_scale": "How far apart the fingers are, independently of how far "
-    "they reach. The MIDAS fingertips span 61 mm at rest against ~48 mm for a "
-    "scaled human hand, so without this the solver swings each finger sideways "
-    "to reach targets inside its own knuckle spacing. Set by 'Calibrate hand "
-    "size'; 1.0 = off.",
+    "they reach. Corrects a static proportion mismatch only -- for fingers that "
+    "lean sideways as you curl, use 'Finger abduction limit' instead. Set by "
+    "'Calibrate hand size'; 1.0 = off, and below ~0.85 it costs real accuracy.",
+    "abduction_limit": "How far the fingers may swing sideways (rad). Turn this "
+    "down if your fingers drift toward the thumb when you simply curl them: your "
+    "fingertips converge as they curl, and the robot -- whose fingers curl in "
+    "parallel planes -- can only copy that by leaning. It gains the solver "
+    "almost nothing (0.5 mm of fingertip accuracy), so bounding it is close to "
+    "free. 0 locks the fingers parallel; below ~0.15 the clipping becomes its "
+    "own artifact.",
     "thumb_vector_scale": "Extra reach given to the thumb's own targets. 1.0 = "
     "off, and off is the default: the thumb-root rebase already removes most of "
     "the MIDAS thumb's proportional excess. Raise toward ~1.15 for a straighter "

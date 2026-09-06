@@ -197,11 +197,15 @@ def test_dexpilot_schema_leads_with_scaling_factor():
     }
     assert controls["scaling_factor"]["advanced"] is False
     assert "hand size" in controls["scaling_factor"]["help"].lower()
-    # 9 solver knobs plus the thumb reach and finger spread multipliers.
-    assert len(controls) == 11
+    # 9 solver knobs plus the thumb reach, finger spread and abduction bound.
+    assert len(controls) == 12
     assert controls["thumb_vector_scale"]["advanced"] is True
     # Finger spread is a calibrated primary knob, not an advanced one.
     assert controls["spread_scale"]["advanced"] is False
+    # The abduction bound is the fix for fingers leaning sideways on a curl,
+    # so it must be reachable without expanding 'advanced'.
+    assert controls["abduction_limit"]["advanced"] is False
+    assert controls["abduction_limit"]["min"] == 0.0
     # Pinch snapping must be switchable off; its floor used to be 5 mm, which
     # still snapped, so the sticking could not be removed from the UI at all.
     assert controls["project_dist"]["min"] == 0.0
