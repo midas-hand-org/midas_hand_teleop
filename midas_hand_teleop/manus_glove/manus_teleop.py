@@ -107,6 +107,11 @@ from midas_hand_teleop.manus_glove.glove_subscriber import (
     parse_glove_array,
     start_data_center_proxy,
 )
+from midas_hand_teleop.shutdown import (
+    close_quietly,
+    exit_without_atexit,
+    protected_shutdown,
+)
 
 logger = logging.getLogger("manus_teleop")
 
@@ -544,11 +549,20 @@ def run(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         logger.info("Interrupted — shutting down cleanly")
     finally:
-        release_zmq()
-        try:
-            backend.close()
-        except Exception:
-            pass
+        # Guard the whole block: a second Ctrl-C here used to skip backend
+        # teardown, leaving the MuJoCo render loop alive so that atexit's
+        # glfw.terminate() deadlocked and the process ignored further Ctrl-C.
+        used_viewer = getattr(backend, "viewer", None) is not None
+        with protected_shutdown(logger):
+            # Backend (and therefore the viewer) before the bus, so GLFW is
+            # torn down while the interpreter is still healthy.
+            clean = close_quietly(logger, "backend", backend.close)
+            clean &= close_quietly(logger, "zmq", release_zmq)
+
+        if used_viewer and clean:
+            # See shutdown.exit_without_atexit: GLFW's Wayland teardown crashes
+            # at interpreter exit even with no code of ours involved.
+            exit_without_atexit(logger, 0)
 
 
 def main() -> None:

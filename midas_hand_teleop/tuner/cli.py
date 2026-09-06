@@ -27,6 +27,7 @@ from midas_hand_retargeter.store import ProfileStore
 from midas_hand_retargeter.tuning import PROFILES, tuning_for_source
 
 from ..backends import MujocoBackend, PrintBackend
+from ..shutdown import close_quietly, exit_without_atexit, protected_shutdown
 from .loop import LoopConfig, TunerLoop
 from .server import serve_in_background
 from .state import TunerState
@@ -147,9 +148,25 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         logger.info("Stopping.")
     finally:
-        server.shutting_down = True
-        server.shutdown()
-        loop.close()
+        used_viewer = getattr(backend, "viewer", None) is not None
+        # A second Ctrl-C must not abort this block. If it did, the MuJoCo
+        # viewer would never close and the process would then deadlock in
+        # glfw.terminate() at interpreter exit, unkillable by Ctrl-C.
+        with protected_shutdown(logger):
+            # Backend first, deliberately: it owns the GUI, and the GLFW
+            # render loop has to be stopped before atexit tries to terminate
+            # the library underneath it.
+            clean = close_quietly(logger, "control loop", loop.close)
+            server.shutting_down = True
+            clean &= close_quietly(logger, "http server", server.shutdown)
+            # shutdown() only stops the accept loop; this releases the socket
+            # so an immediate restart does not hit "address already in use".
+            clean &= close_quietly(logger, "http socket", server.server_close)
+
+        if used_viewer and clean:
+            # GLFW's Wayland teardown crashes at atexit even for a bare MuJoCo
+            # viewer, so a successful run would otherwise report status 139.
+            exit_without_atexit(logger, 0)
     return 0
 
 
