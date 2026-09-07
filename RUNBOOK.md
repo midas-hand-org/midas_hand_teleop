@@ -172,7 +172,8 @@ Only then touch the rest, in this order:
 | knob | what it fixes |
 |---|---|
 | `abduction_limit` | fingers leaning toward the thumb when you simply curl. Default 0.25 rad; 0 locks them parallel. Do not go below ~0.15 — the clipping becomes its own artifact. |
-| `project_dist` | the gap at which a fingertip pair snaps together. Raise it if pinches hover, **lower it (0 disables) if fingers stick to each other**. |
+| `project_dist` | the gap at which a fingertip pair snaps together. **Raise it if pinches leave too big a gap.** It is measured against your RAW landmark gap, and landmarks sit inside your fingers — a pinch you feel as contact still reads ~10 mm, so anything below that disables the snap and a pinch lands ~26 mm open. |
+| `escape_dist` | **the stickiness knob.** Lower it if pinched fingertips cling to each other. Keep it a few mm above `project_dist`; that band is hysteresis. At 0.03/0.05 a real trace was held snapped for 33% of its frames. 0.020/0.024 gives a 1.1 mm pinch and 0% stuck. |
 | `eta1` | how close a snapped thumb-finger pinch gets. |
 | `norm_delta` | smoother but laggier. |
 | `thumb_vector_scale` | (advanced) a straighter thumb, at 1-3 mm of fingertip accuracy. |

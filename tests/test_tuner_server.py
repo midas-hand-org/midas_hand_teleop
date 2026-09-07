@@ -206,9 +206,14 @@ def test_dexpilot_schema_leads_with_scaling_factor():
     # so it must be reachable without expanding 'advanced'.
     assert controls["abduction_limit"]["advanced"] is False
     assert controls["abduction_limit"]["min"] == 0.0
-    # Pinch snapping must be switchable off; its floor used to be 5 mm, which
-    # still snapped, so the sticking could not be removed from the UI at all.
+    # Pinch snapping must be switchable off; its floor used to be 5 mm.
     assert controls["project_dist"]["min"] == 0.0
+    # The two pinch knobs must point at the right symptoms. The old text sent
+    # an operator with sticky fingertips to project_dist, and lowering that
+    # disables the snap instead of releasing it -- so a pinch then lands ~26 mm
+    # open, which is exactly what happened.
+    assert "too big a gap" in controls["project_dist"]["help"]
+    assert "stickiness knob" in controls["escape_dist"]["help"]
 
 
 @pytest.mark.parametrize("mode", ["analytic", "dexpilot", "refine", "vector"])

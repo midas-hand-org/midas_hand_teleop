@@ -130,13 +130,18 @@ HELP: dict[str, str] = {
     "chases small errors harder but is jitterier.",
     "norm_delta": "Temporal regularizer: how strongly each solve is anchored to "
     "the previous one. Larger is smoother but laggier.",
-    "project_dist": "Fingertip gap (m) at which a pair is treated as trying to "
-    "touch, snapping it to eta. This is what makes pinches land instead of "
-    "hover — and also what makes fingertips STICK together: once snapped, a "
-    "pair only releases past escape_dist, so the robot holds a 1 mm gap while "
-    "your own fingers open to 48 mm. Set to 0 to disable snapping entirely.",
-    "escape_dist": "Gap (m) at which a snapped pair releases. Must exceed "
-    "project_dist; the difference is hysteresis against chatter.",
+    "project_dist": "Gap (m) at which a pair is treated as trying to touch, "
+    "snapping it to eta. Turn this UP if pinches leave too big a gap. Measured "
+    "against YOUR raw landmark gap, not the scaled one — and landmarks sit "
+    "inside your fingers, so a pinch you feel as contact still reads about "
+    "10 mm. Below that the snap never fires at all and a pinch lands ~26 mm "
+    "open. 0 disables snapping entirely.",
+    "escape_dist": "Gap (m) at which a snapped pair releases. Turn this DOWN "
+    "if pinched fingertips stick to each other — it is the stickiness knob, "
+    "not project_dist. The band between the two is hysteresis: wide holds the "
+    "pair snapped long after you have opened your hand (at 0.03/0.05, 33% of "
+    "frames on a real trace), narrow releases promptly. Keep it a few mm above "
+    "project_dist.",
     "eta1": "Target gap (m) for thumb-to-finger pairs once snapped.",
     "eta2": "Target gap (m) for finger-to-finger pairs once snapped.",
     "low_pass_alpha": "Solver-side low-pass. 1.0 = off.",
