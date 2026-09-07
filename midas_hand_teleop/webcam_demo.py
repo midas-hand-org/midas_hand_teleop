@@ -20,17 +20,6 @@ DEFAULT_LOCK_INPUT_HAND = False
 DEFAULT_SHOW = True
 
 
-def _build_backend(args):
-    """Delegate to the shared builder so both entry points share one policy.
-
-    In particular the hardware precondition check (refuse an unhomed hand) and
-    the arming semantics live in one place rather than being reimplemented per
-    CLI, which is how the two paths drifted apart in the first place.
-    """
-
-    return build_backend(args)
-
-
 def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
     return {
         name: round(value, 3)
@@ -179,7 +168,7 @@ def main() -> None:
         ),
     )
     pipeline = MidasTeleopPipeline(detector=detector, retargeter=retargeter)
-    backend = _build_backend(args)
+    backend = build_backend(args)
     last_debug_print = 0.0
 
     try:

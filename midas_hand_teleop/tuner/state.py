@@ -18,9 +18,6 @@ from typing import Any
 from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.store import ProfileStore
 
-#: Telemetry frames kept for the UI's rolling traces.
-TRACE_LENGTH = 600
-
 
 @dataclass
 class GloveStatus:
@@ -85,7 +82,6 @@ class TunerState:
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
         self._telemetry: dict[str, Any] = {}
-        self._trace: deque[dict[str, Any]] = deque(maxlen=TRACE_LENGTH)
         self._version = 0
         self._calibration_request: str | None = None
         self._pending_neutral: dict[str, float] | None = None
@@ -124,9 +120,6 @@ class TunerState:
         }
         with self._lock:
             self._telemetry = frame
-            self._trace.append(
-                {"t": frame["t"], "commanded": frame["commanded"], "measured": frame["measured"]}
-            )
             self._version += 1
 
     def snapshot(self) -> dict[str, Any]:
@@ -147,15 +140,6 @@ class TunerState:
             if self._last_client_poll is None:
                 return 0.0
             return time.monotonic() - self._last_client_poll
-
-    def trace(self, joint: str) -> dict[str, list]:
-        with self._lock:
-            rows = list(self._trace)
-        return {
-            "t": [row["t"] for row in rows],
-            "commanded": [row["commanded"].get(joint) for row in rows],
-            "measured": [row["measured"].get(joint) for row in rows],
-        }
 
     def note(self, message: str) -> None:
         with self._lock:

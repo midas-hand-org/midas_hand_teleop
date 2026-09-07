@@ -20,7 +20,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from midas_hand_retargeter import presets
 
@@ -97,9 +97,6 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
                 return self._send_json(self._profile_payload())
             if path == "/api/telemetry":
                 return self._send_json(self.state.snapshot())
-            if path == "/api/trace":
-                joint = parse_qs(route.query).get("joint", [""])[0]
-                return self._send_json(self.state.trace(joint))
             if path == "/api/presets":
                 return self._send_json(
                     {"presets": [p.stem for p in presets.list_presets(self.preset_dir)]}

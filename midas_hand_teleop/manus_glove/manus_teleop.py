@@ -52,7 +52,7 @@ Prereqs: the Manus bridge publishing keypoints (run it first, on x86 with the
 ManusSDK + gloves), or the bundled ``fake_glove_publisher`` for a hardware-free
 smoke test; the MIDAS stack installed in ``midas_env``; and the MuJoCo model
 discoverable (``MIDAS_HAND_MUJOCO_DIR`` or a sibling ``midas_hand_mujoco`` dir).
-The viewer needs a display; use ``--headless`` without one.
+The viewer needs a display; omit ``--mujoco-viewer`` without one.
 
 Run:
     # terminal 1 — the glove bridge (publishes /data_collection/glove/<side>/keypoint/state)
@@ -60,7 +60,7 @@ Run:
     # terminal 2 — this driver (needs a display for the viewer)
     midas-manus-teleop --side right --mujoco-viewer --debug-targets
     # headless smoke test (no display): prints solve rate
-    midas-manus-teleop --side right --headless --duration 10
+    midas-manus-teleop --side right --duration 10
 """
 
 from __future__ import annotations
@@ -573,7 +573,7 @@ def run(args: argparse.Namespace) -> None:
         else:
             logger.info("Running with no viewer and no --duration. Ctrl-C to stop.")
         while True:
-            # --duration applies to every run, not only --headless.
+            # --duration applies to every run, viewer or not.
             if args.duration and time.monotonic() - start >= args.duration:
                 break
             if has_viewer and not viewer_running():
@@ -746,10 +746,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mujoco-viewer", action="store_true", help="Launch the MuJoCo passive viewer"
-    )
-    parser.add_argument(
-        "--headless", action="store_true",
-        help="No viewer (needs no display). Mutually exclusive with --mujoco-viewer.",
     )
     parser.add_argument(
         "--duration", type=float, default=None,
