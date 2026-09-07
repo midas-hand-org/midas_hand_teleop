@@ -176,20 +176,18 @@ class _FakeThread:
     without actually spawning anything (we don't want test threads
     leaking inside the test process).
 
-    Defaults to alive-after-start; tests that need to simulate a thread
-    exiting unexpectedly (to exercise the respawn path) set
-    ``._alive = False`` directly.
+    Alive once started. A test that needs a dead thread subclasses this and
+    overrides ``is_alive``; see test_dead_thread_is_respawned.
     """
 
     def __init__(self) -> None:
         self.started = False
-        self._alive = True
 
     def start(self) -> None:
         self.started = True
 
     def is_alive(self) -> bool:
-        return self.started and self._alive
+        return self.started
 
 
 class TestSpawnPublishThreadIfNeeded:
@@ -236,30 +234,6 @@ class TestSpawnPublishThreadIfNeeded:
         assert spawned == {"left": fake}
         assert fake.started is True
 
-    def test_a_dead_thread_is_respawned(self) -> None:
-        """The case _FakeThread._alive exists for, and the one that was never
-        written: if a publish thread exits -- an exception outside the publish
-        try/except -- that glove side goes silently dead unless the supervisor
-        notices. _spawn_publish_thread_if_needed documents that it respawns;
-        nothing checked it, so `_alive` sat permanently True and the docstring
-        described a test that did not exist."""
-
-        hand_data = _HandData(side="left")
-        hand_data.frame_count = 1
-        dead = _FakeThread()
-        dead.start()
-        dead._alive = False
-        replacement = _FakeThread()
-        spawned = {"left": dead}
-
-        result = _spawn_publish_thread_if_needed(
-            "left", hand_data, spawned, lambda _hand_data: replacement
-        )
-
-        assert result is True, "a dead side must be respawned, not left dead"
-        assert spawned["left"] is replacement
-        assert replacement.started is True
-
     def test_idempotent_when_already_spawned(self) -> None:
         existing = _FakeThread()
         existing.started = True
@@ -280,6 +254,27 @@ class TestSpawnPublishThreadIfNeeded:
         # Factory must NOT be invoked — that's how we avoid leaking threads
         # on every supervisor tick after spawn.
         assert factory_calls == 0
+
+    def test_dead_thread_is_respawned(self) -> None:
+        """If a prior publish thread exited -- an unhandled exception outside
+        the publish try/except -- `spawned[side]` lingers holding a dead Thread
+        and that glove side silently goes offline. The supervisor must replace
+        it on the next tick."""
+
+        hd = self._hd(frame_count=5)
+
+        class _DeadThread(_FakeThread):
+            def is_alive(self) -> bool:
+                return False
+
+        spawned: dict[str, threading.Thread] = {"left": _DeadThread()}
+        new_thread = _FakeThread()
+
+        result = _spawn_publish_thread_if_needed("left", hd, spawned, lambda _: new_thread)
+
+        assert result is True
+        assert spawned["left"] is new_thread
+        assert new_thread.started is True
 
     def test_late_arrival_spawns_only_that_side(self) -> None:
         """Cold-start: left glove powers on first, right is still off."""
@@ -537,52 +532,6 @@ class TestRebuildSenderImpl:
 # ────────────────────────────────────────────────────────────────────────────
 # Dead-thread respawn guard
 # ────────────────────────────────────────────────────────────────────────────
-
-
-class TestSpawnRespawnsDeadThread:
-    """If a prior publish thread exited (e.g. unhandled exception), the
-    supervisor must respawn it on the next tick — otherwise `spawned[side]`
-    lingers with a dead Thread object and the side silently goes offline.
-    """
-
-    def _hd(self, frame_count: int) -> _HandData:
-        hd = _HandData("left")
-        hd.frame_count = frame_count
-        return hd
-
-    def test_alive_thread_is_not_respawned(self) -> None:
-        hd = self._hd(frame_count=5)
-
-        class _AliveThread(_FakeThread):
-            def is_alive(self) -> bool:
-                return True
-
-        spawned: dict[str, threading.Thread] = {"left": _AliveThread()}
-        factory_calls: list[_HandData] = []
-
-        def factory(h):
-            factory_calls.append(h)
-            return _FakeThread()
-
-        result = _spawn_publish_thread_if_needed("left", hd, spawned, factory)
-        assert result is False
-        assert factory_calls == []
-
-    def test_dead_thread_is_respawned(self) -> None:
-        hd = self._hd(frame_count=5)
-
-        class _DeadThread(_FakeThread):
-            def is_alive(self) -> bool:
-                return False
-
-        dead = _DeadThread()
-        spawned: dict[str, threading.Thread] = {"left": dead}
-        new_thread = _FakeThread()
-
-        result = _spawn_publish_thread_if_needed("left", hd, spawned, lambda _: new_thread)
-        assert result is True
-        assert spawned["left"] is new_thread
-        assert new_thread.started is True
 
 
 def test_sdk_library_search_order(tmp_path, monkeypatch):
