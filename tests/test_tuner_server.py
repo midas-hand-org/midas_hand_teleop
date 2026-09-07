@@ -308,3 +308,23 @@ def test_loading_a_preset_queues_its_zero_pose_for_the_loop(server, tmp_path):
     post(base, "/api/presets/load", {"name": "zero"})
     assert state.take_neutral_offsets() == {"index_pip_joint": -0.12}
     assert state.take_neutral_offsets() is None, "consumed exactly once"
+
+
+def test_the_profile_payload_carries_the_history_state(server):
+    """The page has Undo and Redo buttons and the payload has always carried
+    can_undo/can_redo, but nothing read them -- so both buttons stayed enabled
+    with an empty history, offering an action that does nothing."""
+
+    state, base = server
+    fresh = get(base, "/api/profile")
+    assert fresh["can_undo"] is False
+    assert fresh["can_redo"] is False
+
+    edited = post(base, "/api/profile", {"updates": {"index.curl_gain": 1.4}})
+    assert edited["can_undo"] is True
+
+    undone = post(base, "/api/profile/undo", {})
+    assert undone["can_redo"] is True
+
+    # And nothing else: keys with no reader are not published.
+    assert set(fresh) == {"parameters", "can_undo", "can_redo"}

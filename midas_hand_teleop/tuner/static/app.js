@@ -48,10 +48,18 @@ function isModified(path) {
   return JSON.stringify(state.params[path]) !== JSON.stringify(state.defaults[path]);
 }
 
+// Every /api/profile response carries the history state; route them all
+// through here so the Undo/Redo buttons cannot drift out of step with it.
+function applyProfile(payload) {
+  state.params = payload.parameters;
+  $("undo").disabled = !payload.can_undo;
+  $("redo").disabled = !payload.can_redo;
+  return payload;
+}
+
 async function setParam(path, value) {
   try {
-    const payload = await api("/api/profile", { updates: { [path]: value } });
-    state.params = payload.parameters;
+    applyProfile(await api("/api/profile", { updates: { [path]: value } }));
     showError("");
     renderControls();
   } catch (err) {
@@ -297,8 +305,7 @@ async function main() {
   state.schema = await api("/api/schema");
   state.defaults = state.schema.defaults;
   jointLimits = Object.fromEntries(state.schema.joints.map((j) => [j.name, j]));
-  const profile = await api("/api/profile");
-  state.params = profile.parameters;
+  const profile = applyProfile(await api("/api/profile"));
   // The default tab used to be hardcoded to "index", which does not exist in
   // dexpilot mode — the schema is mode-specific, so take the first section it
   // actually offers.
@@ -314,7 +321,7 @@ async function main() {
   $("show-advanced").addEventListener("change", renderControls);
   for (const [id, path] of [["undo", "/api/profile/undo"], ["redo", "/api/profile/redo"], ["reset", "/api/profile/reset"]]) {
     $(id).addEventListener("click", async () => {
-      state.params = (await api(path, {})).parameters;
+      applyProfile(await api(path, {}));
       renderControls();
     });
   }
@@ -324,8 +331,7 @@ async function main() {
   $("cal-scale-hint").hidden = !scaleMode;
   $("cal-scale").addEventListener("click", async () => {
     await api("/api/calibrate", { action: "scale" });
-    const profile = await api("/api/profile");
-    state.params = profile.parameters;
+    applyProfile(await api("/api/profile"));
     renderControls();
   });
   $("cal-capture").addEventListener("click", () => api("/api/calibrate", { action: "capture" }));
@@ -346,8 +352,7 @@ async function main() {
     const name = $("preset-list").value;
     if (!name) return;
     try {
-      const payload = await api("/api/presets/load", { name });
-      state.params = payload.parameters;
+      applyProfile(await api("/api/presets/load", { name }));
       showError("");
       renderControls();
     } catch (err) { showError(err.message); }

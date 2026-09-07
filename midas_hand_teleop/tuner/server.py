@@ -74,8 +74,7 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
         profile = self.state.profile
         return {
             "parameters": profile.to_flat_dict(),
-            "name": profile.name,
-            "source": profile.source,
+            # Read by the page to enable/disable its Undo and Redo buttons.
             "can_undo": self.state.store.can_undo,
             "can_redo": self.state.store.can_redo,
         }
