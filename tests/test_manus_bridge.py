@@ -236,6 +236,30 @@ class TestSpawnPublishThreadIfNeeded:
         assert spawned == {"left": fake}
         assert fake.started is True
 
+    def test_a_dead_thread_is_respawned(self) -> None:
+        """The case _FakeThread._alive exists for, and the one that was never
+        written: if a publish thread exits -- an exception outside the publish
+        try/except -- that glove side goes silently dead unless the supervisor
+        notices. _spawn_publish_thread_if_needed documents that it respawns;
+        nothing checked it, so `_alive` sat permanently True and the docstring
+        described a test that did not exist."""
+
+        hand_data = _HandData(side="left")
+        hand_data.frame_count = 1
+        dead = _FakeThread()
+        dead.start()
+        dead._alive = False
+        replacement = _FakeThread()
+        spawned = {"left": dead}
+
+        result = _spawn_publish_thread_if_needed(
+            "left", hand_data, spawned, lambda _hand_data: replacement
+        )
+
+        assert result is True, "a dead side must be respawned, not left dead"
+        assert spawned["left"] is replacement
+        assert replacement.started is True
+
     def test_idempotent_when_already_spawned(self) -> None:
         existing = _FakeThread()
         existing.started = True
