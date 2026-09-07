@@ -16,6 +16,14 @@ from midas_hand_retargeter.retargeter import RetargetingResult
 
 
 class TeleopBackend(Protocol):
+    """What every command sink must provide.
+
+    Annotated on ``backend_cli.build_backend``, so this is the contract a new
+    backend has to satisfy. ``arm``/``disarm``/``is_armed`` are deliberately
+    NOT part of it: only a sink that can energise something has them, and
+    callers gate on their presence (see ``TunerLoop.hardware_available``).
+    """
+
     def send(self, result: RetargetingResult) -> None:
         ...
 

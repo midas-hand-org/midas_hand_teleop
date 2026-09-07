@@ -1,7 +1,12 @@
 # MIDAS glove teleop — verification runbook
 
-Work through Part A now (glove + sim, everything is on your desk). Part B waits
-for the hand. Part C is the future tactile-haptics phase.
+Part A is glove + sim. Part B is the real hand — **passed end to end**: glove →
+DexPilot → 13 motors, running from the browser tuner with the arm gate, the
+deadman and the preset that was tuned in sim. Part C is the future
+tactile-haptics phase, not started.
+
+Both parts are still worth re-running after any change to the retargeting or
+the hardware path; that is what they are for.
 
 Steps marked **`RECORD:`** produce a value a later step needs — write it in the
 blank so nothing has to be re-derived. Steps marked **`TODO(hardware-day)`**
@@ -122,8 +127,8 @@ Then, in order:
 7. **Rejected edits are safe.** Nothing you can do in the UI should be able to
    command past a joint limit — the sliders are bounded by the URDF.
 
-**`TODO(hardware-day)`** the *Arm hardware* button stays disabled here; it needs
-a hardware backend, which is B4.
+The *Arm hardware* button is disabled unless you launched with
+`--backend hardware`; with it, this same page drives the real hand (B4).
 
 ### A5b. DexPilot mode — fingertip geometry  ☐  ← **run this if fingers look wrong relative to each other**
 

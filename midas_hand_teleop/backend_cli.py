@@ -18,7 +18,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from .backends import HardwareBackend, MujocoBackend, PrintBackend
+from .backends import HardwareBackend, MujocoBackend, PrintBackend, TeleopBackend
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ def check_hardware_preconditions(args) -> None:
     )
 
 
-def build_backend(args, *, control_hz: float | None = None):
+def build_backend(args, *, control_hz: float | None = None) -> TeleopBackend:
     """Construct the backend named by ``args.backend``."""
 
     if args.backend == "print":
