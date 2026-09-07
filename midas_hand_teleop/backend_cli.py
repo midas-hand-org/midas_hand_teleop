@@ -103,6 +103,27 @@ def add_backend_arguments(
     )
 
 
+def check_side_supported(side: str) -> None:
+    """Refuse a left glove. Shared, so no entry point can quietly accept one.
+
+    Not a warning: left-hand support genuinely does not exist, and the two
+    retargeting layers fail differently, so there is no "close enough" here.
+    """
+
+    if str(side).lower() != "left":
+        return
+    raise SystemExit(
+        "Left-hand teleop is not implemented. The MIDAS model is a right hand, "
+        "and mirroring the input does NOT fix it. In analytic mode the map is "
+        "reflection-invariant, so a mirrored frame produces byte-identical "
+        "joint targets (verified: max|delta| = 0.0 across all 13). In the "
+        "Cartesian modes it is worse than useless: the solver matches mirrored "
+        "targets against a right-handed model and produces a genuinely "
+        "mirrored solve. Real support needs sign-aware splay and a signed "
+        "thumb opposition, or a left-handed robot model. Use --side right."
+    )
+
+
 def hardware_is_homed(config_path: str | None = None) -> bool:
     """Whether a saved homing calibration exists."""
 

@@ -26,9 +26,12 @@ This harness measures that geometry instead of tuning blind:
                 the 13 targets), so you can see WHICH joints are off and by how
                 much — that points at the mapping / ROM / neutral cause.
 * ``presets`` — apply every glove frame preset to a captured frame; it will show
-                the targets are identical across presets (the invariance above),
-                confirming the frame is a red herring for the postprocess path.
-                (Frame choice only matters under ``--no-*-postprocess``.)
+                the targets are identical across presets, which is a property of
+                the ANALYTIC map only. Do not read that as "the frame does not
+                matter": the Cartesian modes (``vector``, ``refine``,
+                ``dexpilot``) are handed, and ``dexpilot`` is what glove teleop
+                runs. Palm-framing removes rotation there but not reflection, so
+                a mirrored frame still reaches the solver.
 * ``capture`` — subscribe to a live glove topic, freeze one frame, save to
                 ``.npy`` for offline ``analyze`` / ``compare`` / ``presets``.
 * ``live``    — subscribe, freeze the latest frame, and analyze it.
@@ -103,7 +106,7 @@ def _thumb_points(curl: float, side: float, oppose: float) -> np.ndarray:
     cmc = np.array([-0.035, 0.010, 0.005])
     # Radial base heading swept in-plane by ``side`` and tilted out of plane
     # toward palmar by ``oppose``. The resting angle is chosen so a relaxed thumb
-    # sits near the vision neutral (THUMB_CMC_SIDE_NEUTRAL_ANGLE), i.e. flat ~0.
+    # sits near the vision neutral (ThumbParams.cmc_side_neutral_angle), flat ~0.
     base = np.array([-0.31, 0.95, 0.0])
     base = base / np.linalg.norm(base)
     rot = np.array(

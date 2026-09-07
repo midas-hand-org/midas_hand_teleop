@@ -431,17 +431,16 @@ def _detect_handedness(positions: np.ndarray) -> str | None:
 # ─── Glove → MediaPipe-world frame correction ─────────────────────────────
 # The retargeter expects keypoints in the MediaPipe-world convention (see the
 # midas_hand_retargeter.human module docstring): a right-handed metric frame.
-# ONLY the frame's chirality is load-bearing for the geometric postprocess —
-# its palm basis is rotation-invariant, but the palm normal is a cross product
-# that FLIPS SIGN under a reflection, which inverts thumb opposition and finger
-# splay while leaving finger curl (a magnitude) intact.
 #
-# The legacy transform negated Y — a reflection (det = -1) fit to the OLD
-# wuji-retargeting IK solver. For the current palm-basis postprocess that flip
-# inverts chirality, so the default is now the identity (chirality-preserving).
+# Only the frame's CHIRALITY is load-bearing, and it is load-bearing for the
+# Cartesian modes (vector, refine, dexpilot), not for the analytic map — that
+# one is provably invariant to reflection, which is exactly how a mirrored
+# frame went unnoticed for so long. See GLOVE_FRAME_PRESETS below for the
+# measurement, and note the default is a REFLECTION (flip_y), not the identity.
+#
 # If a captured pinch/curl pose shows inverted thumb opposition or mirrored
-# finger splay in ``midas-hand-diag``, switch presets via ``--glove-frame`` /
-# ``$MIDAS_GLOVE_FRAME`` (no code edit or recompile needed).
+# finger splay, switch presets via ``--glove-frame`` / ``$MIDAS_GLOVE_FRAME``
+# (no code edit or recompile needed).
 #: Axis remaps applied to raw glove keypoints before publishing.
 #:
 #: **The determinant is what matters, not the axis.** As published, the Manus
@@ -451,7 +450,7 @@ def _detect_handedness(positions: np.ndarray) -> str | None:
 #: (det = -1) corrects that; all three flips below give an identical result
 #: once the retargeter normalises into the palm frame.
 #:
-#: This was set to ``identity`` on the reasoning that chirality "is NOT what
+#: This was once set to ``identity`` on the reasoning that chirality "is NOT what
 #: makes it track poorly". That is true of the analytic map and provably so —
 #: it is invariant to reflection — which is exactly why a mirrored frame went
 #: unnoticed. It is false for anything that compares 3D directions against the
@@ -492,8 +491,9 @@ def _positions_to_mediapipe(
 
     ``frame_transform`` is an optional 3x3 axis remap applied to every point so
     the glove lands in the MediaPipe-world convention the retargeter expects.
-    Defaults to identity (no reflection); see ``GLOVE_FRAME_PRESETS`` for the
-    chirality rationale.
+    Callers should pass ``resolve_glove_frame(...)``'s transform, whose default
+    is a REFLECTION; see ``GLOVE_FRAME_PRESETS`` for the chirality rationale.
+    Passing nothing here applies no remap, which publishes a mirrored hand.
     """
     keypoints = np.zeros((21, 3), dtype=np.float64)
     filled = 0
@@ -511,12 +511,60 @@ def _positions_to_mediapipe(
 # ─── Bridge main ─────────────────────────────────────────────────────────
 
 
+#: Filename of the integrated Manus SDK shared library.
+SDK_LIBRARY_NAME = "libManusSDK_Integrated.so"
+
+#: Last-resort locations, searched in order after the explicit ones.
+SDK_LIBRARY_SEARCH_PATHS = (
+    f"/usr/local/lib/{SDK_LIBRARY_NAME}",
+    f"/opt/ManusSDK/lib/{SDK_LIBRARY_NAME}",
+)
+
+
+def resolve_sdk_library(explicit: str | None = None) -> str | None:
+    """Find the Manus SDK shared library, or return None.
+
+    Order: ``explicit`` (i.e. ``--sdk-lib``), ``$MANUS_SDK_LIB``,
+    ``$MANUS_SDK_DIR/lib/<name>`` and ``$MANUS_SDK_DIR/<name>``, then the
+    hardcoded system paths.
+
+    This exists because the SDK is proprietary and cannot be vendored, so
+    anyone outside this machine needs a way to say where theirs is. The README
+    described exactly this lookup for a long time before it existed.
+    """
+
+    # An explicitly named path is a statement of intent, so a missing one is an
+    # error rather than a reason to search on. Falling through would silently
+    # load a different SDK than the one asked for.
+    for label, named in (("--sdk-lib", explicit),
+                         ("$MANUS_SDK_LIB", os.environ.get("MANUS_SDK_LIB"))):
+        if named:
+            expanded = os.path.expanduser(named)
+            if not os.path.exists(expanded):
+                raise FileNotFoundError(f"{label} points at nothing: {expanded}")
+            return expanded
+
+    candidates: list[str] = []
+    sdk_dir = os.environ.get("MANUS_SDK_DIR")
+    if sdk_dir:
+        candidates.append(os.path.join(sdk_dir, "lib", SDK_LIBRARY_NAME))
+        candidates.append(os.path.join(sdk_dir, SDK_LIBRARY_NAME))
+    candidates.extend(SDK_LIBRARY_SEARCH_PATHS)
+
+    for candidate in candidates:
+        expanded = os.path.expanduser(candidate)
+        if os.path.exists(expanded):
+            return expanded
+    return None
+
+
 def run_bridge(
     swap_sides: bool = False,
     rate_hz: float = 120.0,
     haptics: bool = True,
     host: str | None = None,
     glove_frame: str | None = None,
+    sdk_lib: str | None = None,
 ) -> None:
     """Run the dual-hand Manus bridge.
 
@@ -525,7 +573,10 @@ def run_bridge(
 
     ``glove_frame`` selects the axis remap applied to published keypoints (see
     ``GLOVE_FRAME_PRESETS``); if None it falls back to ``$MIDAS_GLOVE_FRAME``
-    then the identity default.
+    then to ``DEFAULT_GLOVE_FRAME``, which is a reflection.
+
+    ``sdk_lib`` is an explicit path to the Manus SDK shared library; see
+    ``resolve_sdk_library`` for the search order.
     """
     frame_name, frame_transform = resolve_glove_frame(glove_frame)
     logger.info(
@@ -584,14 +635,20 @@ def run_bridge(
     signal.signal(signal.SIGTERM, _shutdown)
 
     # ── Load SDK ──
-    lib_paths = [
-        "/usr/local/lib/libManusSDK_Integrated.so",
-        "/opt/ManusSDK/lib/libManusSDK_Integrated.so",
-    ]
-    lib_path = next((p for p in lib_paths if os.path.exists(p)), None)
+    lib_path = resolve_sdk_library(sdk_lib)
     if not lib_path:
-        logger.error("ManusSDK not found at %s", lib_paths)
-        return
+        logger.error(
+            "ManusSDK not found. The SDK is proprietary and is not vendored "
+            "here. Searched, in order: --sdk-lib, $MANUS_SDK_LIB, "
+            "$MANUS_SDK_DIR/lib, %s. Point --sdk-lib at your "
+            "%s.",
+            ", ".join(SDK_LIBRARY_SEARCH_PATHS),
+            SDK_LIBRARY_NAME,
+        )
+        # Nonzero: this bridge is normally backgrounded, so exiting 0 here made
+        # a missing SDK look like a clean start, and every downstream symptom
+        # (0 Hz, "glove not connected") pointed at the wrong place.
+        sys.exit(2)
 
     logger.info("Loading ManusSDK from %s", lib_path)
     lib = ctypes.CDLL(lib_path)
@@ -1076,6 +1133,13 @@ def main() -> None:
         f"'{DEFAULT_GLOVE_FRAME}'). Use 'flip_*' if midas-hand-diag reports inverted "
         "thumb opposition / mirrored finger splay.",
     )
+    parser.add_argument(
+        "--sdk-lib",
+        default=None,
+        help=f"Path to {SDK_LIBRARY_NAME}. The SDK is proprietary and is not "
+        "vendored, so this (or $MANUS_SDK_LIB / $MANUS_SDK_DIR) is how you say "
+        "where yours is. Falls back to /usr/local/lib and /opt/ManusSDK/lib.",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -1090,6 +1154,7 @@ def main() -> None:
         haptics=not args.no_haptics,
         host=args.host,
         glove_frame=args.glove_frame,
+        sdk_lib=args.sdk_lib,
     )
 
 

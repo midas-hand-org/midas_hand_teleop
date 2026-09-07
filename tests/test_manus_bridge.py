@@ -10,6 +10,7 @@ import threading
 import time
 
 import numpy as np
+import pytest
 
 from midas_hand_teleop.manus_glove.manus_bridge import (
     _SIDE_INVALID,
@@ -558,3 +559,50 @@ class TestSpawnRespawnsDeadThread:
         assert result is True
         assert spawned["left"] is new_thread
         assert new_thread.started is True
+
+
+def test_sdk_library_search_order(tmp_path, monkeypatch):
+    """The SDK is proprietary and cannot be vendored, so anyone outside this
+    machine needs a way to say where theirs is. The README described exactly
+    this lookup for a long time before it existed."""
+
+    from midas_hand_teleop.manus_glove.manus_bridge import (
+        SDK_LIBRARY_NAME,
+        resolve_sdk_library,
+    )
+
+    monkeypatch.delenv("MANUS_SDK_LIB", raising=False)
+    monkeypatch.delenv("MANUS_SDK_DIR", raising=False)
+
+    explicit = tmp_path / "explicit.so"
+    explicit.write_bytes(b"")
+    assert resolve_sdk_library(str(explicit)) == str(explicit)
+
+    from_env = tmp_path / "from_env.so"
+    from_env.write_bytes(b"")
+    monkeypatch.setenv("MANUS_SDK_LIB", str(from_env))
+    assert resolve_sdk_library() == str(from_env)
+    # An explicit argument still wins over the environment.
+    assert resolve_sdk_library(str(explicit)) == str(explicit)
+
+    monkeypatch.delenv("MANUS_SDK_LIB")
+    (tmp_path / "lib").mkdir()
+    in_dir = tmp_path / "lib" / SDK_LIBRARY_NAME
+    in_dir.write_bytes(b"")
+    monkeypatch.setenv("MANUS_SDK_DIR", str(tmp_path))
+    assert resolve_sdk_library() == str(in_dir)
+
+
+def test_a_named_sdk_path_that_does_not_exist_is_an_error(monkeypatch):
+    """Falling through to a system copy would silently load a different SDK
+    than the one asked for."""
+
+    from midas_hand_teleop.manus_glove.manus_bridge import resolve_sdk_library
+
+    monkeypatch.delenv("MANUS_SDK_LIB", raising=False)
+    with pytest.raises(FileNotFoundError, match="--sdk-lib"):
+        resolve_sdk_library("/definitely/not/here.so")
+
+    monkeypatch.setenv("MANUS_SDK_LIB", "/also/not/here.so")
+    with pytest.raises(FileNotFoundError, match="MANUS_SDK_LIB"):
+        resolve_sdk_library()

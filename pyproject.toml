@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "midas-hand-teleop"
 version = "0.1.0"
-description = "MediaPipe webcam teleoperation pipeline for the MIDAS hand"
+description = "Manus-glove and webcam teleoperation for the MIDAS hand, in MuJoCo and on hardware"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

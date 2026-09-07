@@ -201,6 +201,15 @@ function renderStatus() {
   armButton.textContent = l.armed ? "Disarm" : "Arm hardware";
   armButton.classList.toggle("armed", Boolean(l.armed));
 
+  // These are always computed from the landmarks by the analytic map, which in
+  // the optimizer modes is a READ of your hand rather than what drives the
+  // joints. Saying so, because a readout that looks like a cause but is not is
+  // the same trap as a slider that does nothing.
+  $("intermediates-hint").textContent = l.mode === "analytic"
+    ? "What the analytic map computed before it hit the joint ranges."
+    : `A read of your hand from the analytic map. In ${l.mode} these do NOT `
+      + "drive the joints, so they explain your pose, not the robot's.";
+
   $("provenance").textContent =
     l.mode === "analytic"
       ? "All 13 joints come from the analytic map, so every slider here is live."

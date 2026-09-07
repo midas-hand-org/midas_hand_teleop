@@ -7,23 +7,16 @@ import time
 
 import cv2
 from midas_hand_retargeter import MidasHandRetargeter
-from midas_hand_retargeter.adaptor import PIP_DIP_LOOKUP_MODE, SUPPORTED_COUPLING_MODES
+from midas_hand_retargeter.adaptor import SUPPORTED_COUPLING_MODES
 from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
 
-from .backend_cli import build_backend
+from .backend_cli import add_backend_arguments, build_backend
 from .detector import MediaPipeHandDetector
 from .pipeline import MidasTeleopPipeline
 
 # print, not hardware: a bare `midas-hand-teleop` must not energise motors.
 DEFAULT_BACKEND = "print"
-DEFAULT_CONFIGURE_HARDWARE = True
 DEFAULT_DEBUG_TARGETS = True
-DEFAULT_HARDWARE_PORT = "/dev/ttyUSB0"
-DEFAULT_HARDWARE_CURRENT_LIMIT = 350
-DEFAULT_HARDWARE_COMMAND_SCALE = 1.0
-DEFAULT_HARDWARE_MAX_STEP_RAD = 0.15
-DEFAULT_HARDWARE_RATE_HZ = 50.0
-DEFAULT_HARDWARE_INTERPOLATION_ALPHA = 0.4
 DEFAULT_LOCK_INPUT_HAND = False
 DEFAULT_SHOW = True
 
@@ -46,7 +39,12 @@ def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
     }
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI surface, as its own function so tests can read the defaults.
+
+    Named to match manus_teleop and the tuner, which both already do this.
+    """
+
     parser = argparse.ArgumentParser(description="Run MIDAS webcam teleop.")
     parser.add_argument("--camera", default=0, help="OpenCV camera index or video path.")
     parser.add_argument(
@@ -95,16 +93,12 @@ def main() -> None:
         default=DEFAULT_SHOW,
         help="Show webcam landmarks.",
     )
-    parser.add_argument(
-        "--backend",
-        choices=["print", "mujoco", "hardware"],
-        default=DEFAULT_BACKEND,
-    )
-    parser.add_argument(
-        "--hand-landmarker-model",
-        default=None,
-        help="Optional MediaPipe Tasks hand_landmarker.task path.",
-    )
+    # The shared definitions, not a fourth copy: this CLI had drifted into a
+    # hardware group with no --start-armed and no --allow-unhomed, so
+    # `midas-hand-teleop --backend hardware` connected, configured, and could
+    # then never energise the hand -- build_backend reads start_armed with a
+    # getattr default of False and nothing else ever calls arm().
+    add_backend_arguments(parser, default=DEFAULT_BACKEND, include_mujoco=False)
     parser.add_argument("--mujoco-repo", default=None)
     parser.add_argument("--mujoco-xml", default=None)
     parser.add_argument("--mujoco-viewer", action="store_true")
@@ -112,59 +106,10 @@ def main() -> None:
     parser.add_argument(
         "--coupling-mode",
         choices=SUPPORTED_COUPLING_MODES,
-        default=PIP_DIP_LOOKUP_MODE,
-        help="Passive PIP-DIP coupling model used by the retargeter.",
-    )
-    parser.add_argument(
-        "--configure-hardware",
-        action=argparse.BooleanOptionalAction,
-        default=DEFAULT_CONFIGURE_HARDWARE,
-    )
-    parser.add_argument(
-        "--hardware-config",
         default=None,
-        help="Optional midas_hand_api calibration config. Defaults to ~/.midas_hand/config.yaml.",
-    )
-    parser.add_argument(
-        "--hardware-port",
-        default=DEFAULT_HARDWARE_PORT,
-        help="Optional Dynamixel serial port override, for example /dev/ttyUSB0.",
-    )
-    parser.add_argument(
-        "--hardware-baudrate",
-        type=int,
-        default=None,
-        help="Optional Dynamixel baudrate override.",
-    )
-    parser.add_argument(
-        "--hardware-current-limit",
-        type=int,
-        default=DEFAULT_HARDWARE_CURRENT_LIMIT,
-        help="Optional current limit in mA to apply when --configure-hardware is used.",
-    )
-    parser.add_argument(
-        "--hardware-command-scale",
-        type=float,
-        default=DEFAULT_HARDWARE_COMMAND_SCALE,
-        help="Scale hardware commands around calibrated zero; use 0.3-0.5 for first bring-up.",
-    )
-    parser.add_argument(
-        "--hardware-max-step-rad",
-        type=float,
-        default=DEFAULT_HARDWARE_MAX_STEP_RAD,
-        help="Maximum per-hardware-tick motor target change in radians; use 0 to disable slew limiting.",
-    )
-    parser.add_argument(
-        "--hardware-rate-hz",
-        type=float,
-        default=DEFAULT_HARDWARE_RATE_HZ,
-        help="Fixed hardware command update rate in Hz; use 0 to send directly from the vision loop.",
-    )
-    parser.add_argument(
-        "--hardware-interpolation-alpha",
-        type=float,
-        default=DEFAULT_HARDWARE_INTERPOLATION_ALPHA,
-        help="Fraction of remaining target distance to move each hardware tick; lower is smoother.",
+        help="Passive PIP-DIP coupling model. Default: let the mode choose -- "
+        "the Cartesian modes need the lookup or the fingertip the solver aims "
+        "at is up to 59 mm from where the four-bar linkage puts it.",
     )
     parser.add_argument("--scaling-factor", type=float, default=1.15)
     parser.add_argument("--finger-curl-gain", type=float, default=DEFAULT_TUNING.finger_curl_gain)
@@ -175,10 +120,6 @@ def main() -> None:
     parser.add_argument("--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain)
     parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
     parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
-    parser.add_argument("--finger-abad-alpha", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
-    parser.add_argument("--thumb-cmc-alpha", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
-    parser.add_argument("--thumb-mcp-closed", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
-    parser.add_argument("--thumb-dip-closed", type=float, default=None, help="Deprecated; superseded by the per-finger tuning profile.")
     parser.add_argument(
         "--debug-targets",
         action=argparse.BooleanOptionalAction,
@@ -186,18 +127,11 @@ def main() -> None:
         help="Print detected handedness and active joint targets while running.",
     )
     parser.set_defaults(lock_input_hand=DEFAULT_LOCK_INPUT_HAND)
-    args = parser.parse_args()
-    if args.finger_abad_alpha is not None:
-        args.finger_smoothing_alpha = args.finger_abad_alpha
-    if args.thumb_cmc_alpha is not None:
-        args.thumb_smoothing_alpha = args.thumb_cmc_alpha
-    legacy_thumb_gains = []
-    if args.thumb_mcp_closed is not None:
-        legacy_thumb_gains.append(args.thumb_mcp_closed / -0.88)
-    if args.thumb_dip_closed is not None:
-        legacy_thumb_gains.append(args.thumb_dip_closed / -0.72)
-    if legacy_thumb_gains:
-        args.thumb_flexion_gain = max(0.0, sum(legacy_thumb_gains) / len(legacy_thumb_gains))
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     camera = int(args.camera) if str(args.camera).isdigit() else args.camera
     cap = cv2.VideoCapture(camera)

@@ -100,6 +100,7 @@ from midas_hand_teleop.backend_cli import (
     add_backend_arguments,
     build_backend,
     check_hardware_preconditions,
+    check_side_supported,
 )
 from midas_hand_teleop.backends import MujocoBackend
 from midas_hand_teleop.manus_glove.glove_subscriber import (
@@ -199,20 +200,39 @@ _GAIN_ARGS = (
 )
 
 
-def build_tuning(args: argparse.Namespace) -> RetargeterTuning:
-    """Build the tuning from the selected source profile plus explicit overrides.
+def build_tuning(args: argparse.Namespace):
+    """Build the tuning from a preset, or the source profile plus overrides.
 
-    The base profile (``--profile``) supplies source-appropriate gains, smoothing,
-    and bend normalizers. Any ``--*-gain`` flag the user set explicitly (i.e. not
-    ``None``) overrides the corresponding profile field.
+    ``--preset`` wins and returns a ``RetargetProfile``, which is the only way
+    a tuned DexPilot session reaches this CLI: the legacy ``RetargeterTuning``
+    that ``--profile`` produces has no dexpilot section at all, so every solver
+    knob would silently fall back to a library default.
+
+    Otherwise the base profile (``--profile``) supplies source-appropriate
+    gains, smoothing, and bend normalizers, and any ``--*-gain`` flag the user
+    set explicitly overrides the corresponding field.
     """
+
+    if args.preset:
+        from midas_hand_retargeter import presets
+
+        profile, neutral = presets.load(args.preset)
+        logger.info(
+            "Loaded preset %s (%d neutral offsets)", args.preset, len(neutral)
+        )
+        if args.scaling_factor is not None:
+            profile = profile.with_values(
+                {"dexpilot.scaling_factor": args.scaling_factor}
+            )
+        return profile, neutral
+
     base = tuning_for_source(args.profile)
     overrides = {
         name: getattr(args, name)
         for name in _GAIN_ARGS
         if getattr(args, name) is not None
     }
-    return replace(base, **overrides) if overrides else base
+    return (replace(base, **overrides) if overrides else base), {}
 
 
 def resolve_filter_alpha(
@@ -307,39 +327,51 @@ def build_retargeter(
     return MidasHandRetargeter.create(
         mode=mode,
         mujoco_repo=args.mujoco_repo,
-        scaling_factor=args.scaling_factor,
+        scaling_factor=1.15 if args.scaling_factor is None else args.scaling_factor,
         coupling_mode=args.coupling_mode,
         tuning=tuning,
     )
 
 
 def run(args: argparse.Namespace) -> None:
+    # First, before a solver is built or a port is opened: there is nothing
+    # useful to do with a left glove and no reason to spend a second finding out.
+    check_side_supported(args.side)
+
     glove_topic = GLOVE_TOPIC.format(side=args.side)
     host = args.host
-    tuning = build_tuning(args)
+    tuning, preset_neutral = build_tuning(args)
     retargeter = build_retargeter(args, tuning)  # None => geometric direct-map
+    if retargeter is not None and preset_neutral:
+        # A preset carries the zero pose it was captured with; installing it is
+        # the other half of reproducing that session.
+        retargeter.set_neutral_offsets(preset_neutral)
+        logger.info("Applied the preset's zero pose (%d joints)", len(preset_neutral))
     hand_type = "Right" if args.side == "right" else "Left"
-    logger.info(
-        "Retargeting mode: %s (profile=%s)%s",
-        args.retarget,
-        args.profile,
-        f" (scaling={args.scaling_factor}, finger_pp={args.finger_postprocess}, "
-        f"thumb_pp={args.thumb_postprocess}, coupling={args.coupling_mode})"
-        if retargeter is not None
-        else "",
-    )
-
-    if args.side != "right":
-        # Not a warning: left-hand support genuinely does not exist. The
-        # analytic map is reflection-invariant, so mirroring the landmarks
-        # changes nothing (verified: max|delta| = 0.0 across all 13 targets).
-        # Real support needs a sign-aware splay and a signed thumb opposition,
-        # or a left-handed robot model.
-        raise SystemExit(
-            "Left-hand teleop is not implemented. The MIDAS model is a right "
-            "hand, and mirroring the input does NOT fix this: the analytic map "
-            "is reflection-invariant, so a mirrored frame produces byte-identical "
-            "joint targets. Use --side right."
+    if retargeter is None:
+        logger.info("Retargeting mode: %s (profile=%s)", args.retarget, args.profile)
+    else:
+        # Report what the retargeter RESOLVED, not what was asked for. The
+        # Cartesian modes override the coupling default, and dexpilot ignores
+        # scaling/finger_pp/thumb_pp entirely -- printing those as if they were
+        # in force is how an operator comes to believe a dead knob is live.
+        source = f"preset={args.preset}" if args.preset else f"profile={args.profile}"
+        config = retargeter.config
+        if args.retarget == "dexpilot":
+            detail = (
+                f"scaling={retargeter.profile.dexpilot.scaling_factor:.2f}, "
+                f"abduction_limit={retargeter.profile.dexpilot.abduction_limit:.2f}, "
+                f"coupling={config.coupling_mode}"
+            )
+        else:
+            detail = (
+                f"scaling={config.scaling_factor:.2f}, "
+                f"finger_pp={args.finger_postprocess}, "
+                f"thumb_pp={args.thumb_postprocess}, "
+                f"coupling={config.coupling_mode}"
+            )
+        logger.info(
+            "Retargeting mode: %s (%s) (%s)", config.mode, source, detail
         )
 
     # Relay so the bridge (PUB->5710) reaches our subscriber (SUB<-5711). Returns
@@ -626,9 +658,14 @@ def run(args: argparse.Namespace) -> None:
             exit_without_atexit(logger, 0)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI surface, as its own function so tests can read the defaults.
+
+    Named to match webcam_demo and the tuner, which both already do this.
+    """
+
     parser = argparse.ArgumentParser(
-        description="Manus glove -> MIDAS hand finger teleop in MuJoCo"
+        description="Manus glove -> MIDAS hand finger teleop, in sim or on hardware"
     )
     parser.add_argument("--side", choices=["right", "left"], default="right")
     parser.add_argument(
@@ -638,6 +675,16 @@ def main() -> None:
         "localhost)",
     )
     # --- Retargeting ---
+    parser.add_argument(
+        "--preset",
+        default=None,
+        help="Load a tuned profile by name from ~/.midas_hand/retarget_presets "
+        "(or a path). REQUIRED to reproduce a DexPilot tuning session: without "
+        "it every solver knob falls back to a library default, because the "
+        "legacy --profile form has no dexpilot section. Also installs the zero "
+        "pose the preset was saved with. Pass --retarget dexpilot too; a preset "
+        "does not record which mode it was tuned in.",
+    )
     parser.add_argument(
         "--profile",
         choices=sorted(PROFILES),
@@ -659,9 +706,10 @@ def main() -> None:
     parser.add_argument(
         "--scaling-factor",
         type=float,
-        default=1.15,
-        help="(full) dex_retargeting vector scaling — human-to-robot size ratio. "
-        "Raise/lower if fingers over/under-reach.",
+        default=None,
+        help="Human-to-robot size ratio. Applies to --retarget full and, with "
+        "--preset, to dexpilot. Raise/lower if fingers over/under-reach. "
+        "Default: 1.15 for full, or whatever the preset says for dexpilot.",
     )
     parser.add_argument(
         "--no-finger-postprocess",
@@ -681,9 +729,12 @@ def main() -> None:
     parser.add_argument(
         "--coupling-mode",
         choices=["fixed_passive", "pip_dip_lookup"],
-        default="fixed_passive",
-        help="(full) passive DIP handling. fixed_passive: MJCF equality constraints "
-        "drive DIP in sim. pip_dip_lookup: fill DIP from the PIP-DIP lookup table.",
+        default=None,
+        help="Passive DIP handling. fixed_passive: let the MJCF equality "
+        "constraints drive DIP in sim. pip_dip_lookup: fill DIP from the "
+        "four-bar lookup table. Default: let the mode choose -- the Cartesian "
+        "modes need the lookup, because without it the fingertip the solver "
+        "aims at is up to 59 mm from where the linkage actually puts it.",
     )
     parser.add_argument(
         "--calibrate-delay",
@@ -770,7 +821,11 @@ def main() -> None:
     parser.add_argument("--thumb-cmc-roll-gain", type=float, default=None)
     parser.add_argument("--thumb-flexion-gain", type=float, default=None)
     parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

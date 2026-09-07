@@ -33,7 +33,11 @@ from midas_hand_retargeter.params import RetargetProfile
 from midas_hand_retargeter.store import ProfileStore
 from midas_hand_retargeter.tuning import PROFILES, tuning_for_source
 
-from ..backend_cli import add_backend_arguments, build_backend
+from ..backend_cli import (
+    add_backend_arguments,
+    build_backend,
+    check_side_supported,
+)
 from ..shutdown import (
     close_quietly,
     exit_without_atexit,
@@ -134,6 +138,8 @@ def build_state(args) -> TunerState:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     _configure_logging(args.log_level, args.log_file)
+
+    check_side_supported(args.side)
 
     state = build_state(args)
     state.loop.mode = args.mode

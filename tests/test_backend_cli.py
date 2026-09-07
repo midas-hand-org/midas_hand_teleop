@@ -87,6 +87,7 @@ def test_left_hand_is_refused_rather_than_warned():
     from midas_hand_teleop.manus_glove import manus_teleop
 
     args = argparse.Namespace(side="left", retarget="geometric", calibrate_delay=0.0,
+                              preset=None,
                               profile="glove", filter_alpha=None, host="localhost")
     for name in ("finger_curl_gain", "finger_abad_gain", "finger_smoothing_alpha",
                  "thumb_cmc_gain", "thumb_cmc_side_gain", "thumb_cmc_roll_gain",
@@ -108,3 +109,61 @@ def test_dead_cli_flags_are_gone():
                  "--finger-abad-limit", "--thumb-cmc-side-oppose"):
         assert flag not in source, f"{flag} names behaviour that does not exist"
     assert "argparse.SUPPRESS" not in source
+
+
+def test_every_entry_point_can_actually_arm_hardware():
+    """webcam_demo had drifted into its own hardware group with no
+    --start-armed and no --allow-unhomed, so `midas-hand-teleop --backend
+    hardware` connected, configured, and could then never energise the hand:
+    build_backend reads start_armed with a getattr default of False and nothing
+    else in that path calls arm()."""
+
+    from midas_hand_teleop.manus_glove.manus_teleop import (
+        build_parser as manus_parser,
+    )
+    from midas_hand_teleop.tuner.cli import build_parser as tuner_parser
+    from midas_hand_teleop.webcam_demo import build_parser as webcam_parser
+
+    for name, parser in (
+        ("midas-hand-teleop", webcam_parser()),
+        ("midas-manus-teleop", manus_parser()),
+        ("midas-hand-tune", tuner_parser()),
+    ):
+        args = parser.parse_args([])
+        for flag in ("start_armed", "allow_unhomed", "hardware_current_limit",
+                     "hardware_max_step_rad", "configure_hardware"):
+            assert hasattr(args, flag), f"{name} is missing --{flag.replace('_', '-')}"
+        assert args.start_armed is False, f"{name} arms by default"
+        assert "hardware" in parser.parse_args(["--backend", "hardware"]).backend
+
+
+def test_no_entry_point_defaults_to_hardware():
+    """A bare invocation must never energise a motor."""
+
+    from midas_hand_teleop.manus_glove.manus_teleop import (
+        build_parser as manus_parser,
+    )
+    from midas_hand_teleop.tuner.cli import build_parser as tuner_parser
+    from midas_hand_teleop.webcam_demo import build_parser as webcam_parser
+
+    for parser in (webcam_parser(), manus_parser(), tuner_parser()):
+        assert parser.parse_args([]).backend != "hardware"
+
+
+def test_no_entry_point_silently_accepts_a_left_glove():
+    """The tuner used to retarget a left glove onto the right-hand model
+    without a word. The two layers fail differently -- analytic is
+    reflection-invariant so mirroring changes nothing, while the Cartesian
+    modes produce a genuinely mirrored solve -- so there is no reading of it
+    that works, and the check is shared to keep them in step."""
+
+    from midas_hand_teleop.backend_cli import check_side_supported
+
+    check_side_supported("right")  # must not raise
+    with pytest.raises(SystemExit, match="Left-hand teleop is not implemented"):
+        check_side_supported("left")
+
+    from midas_hand_teleop.tuner import cli as tuner_cli
+
+    with pytest.raises(SystemExit, match="Left-hand teleop is not implemented"):
+        tuner_cli.main(["--side", "left", "--duration", "0.1"])
