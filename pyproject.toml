@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "midas-hand-teleop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Manus-glove and webcam teleoperation for the MIDAS hand, in MuJoCo and on hardware"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 # on hardware -- needs neither opencv nor mediapipe, and those two are 252 MB
 # between them, so they are the [webcam] extra rather than a required install.
 dependencies = [
-    "midas-hand-retargeter>=0.1.0",
+    "midas-hand-retargeter>=0.2.0",
     "numpy>=2.0",
 ]
 
