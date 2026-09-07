@@ -25,7 +25,7 @@ source midas_env/bin/activate        # or use midas_env/bin/... directly
 (cd midas_hand_teleop     && pytest -q)
 ```
 
-Expected: **142 passed** and **105 passed**. Was 29 + 49 before this work.
+Expected: **152 passed** and **128 passed**. Was 29 + 49 before this work.
 
 ### A1. The default install is clean  ☐
 
@@ -135,35 +135,29 @@ inter-fingertip vectors plus four palm-rooted ones, which is that missing
 capability.
 
 ```bash
-midas-hand-tune --mode dexpilot --open
+midas-manus-bridge &
+midas-hand-tune --mode dexpilot --mujoco-viewer --open
 ```
 
 **Calibrate `scaling_factor` FIRST — nothing else matters until it is right.**
 It is your hand size relative to the robot's, and it is the one parameter the
 analytic map never had. A 0.7x-1.5x change moves joints by ~1.5 rad.
 
-Estimate it before touching the slider:
+You do not have to estimate it any more. Hold your hand flat and open and press
+**Calibrate hand size**: it fits the scale from the median of your index,
+middle and ring reach against the robot's, and reports what it set.
 
-```bash
-python - <<'EOF'
-import numpy as np
-from midas_hand_retargeter import MidasHandRetargeter
-r = MidasHandRetargeter.create(mode="dexpilot")
-rb = r.dex_retargeting.optimizer.robot
-rb.compute_forward_kinematics(np.zeros(19))
-inv = np.linalg.inv(rb.get_link_pose(rb.get_link_index("palm_base")))
-for n, link in (("index","index_tip"),("middle","middle_tip"),("ring","ring_tip")):
-    p = (inv @ rb.get_link_pose(rb.get_link_index(link)))[:3,3]
-    print(f"robot {n}: {np.linalg.norm(p)*1000:.0f} mm")
-EOF
-```
+Note it sets **two** parameters. The second is `spread_scale` — finger SPACING
+rather than reach, fitted from your fingertip span at rest. That is deliberate,
+but be aware one button moves two sliders, and `spread_scale` costs real
+accuracy below ~0.85 (mean inter-fingertip error 5.5 mm at 1.0, 6.4 mm at 0.86,
+13.5 mm at 0.65).
 
-The MIDAS hand reaches ~218 mm from `palm_base` to fingertip with the hand
-open. Measure your own wrist-to-fingertip with a ruler, then start at
-`robot / yours` — about **1.2 for a 180 mm hand, 1.55 for a 140 mm hand**. The
-inherited default of 1.15 is almost certainly too low.
+**`RECORD:` calibrated scaling_factor = ________  spread_scale = ________**
 
-**`RECORD:` my wrist-to-fingertip = ________ mm → starting scaling = ________**
+If you want to sanity-check it against a ruler, the MIDAS hand reaches ~218 mm
+from `palm_base` to fingertip with the hand open, so `218 / your_reach_mm` is
+roughly what the button should produce.
 
 Then, on the slider:
 
@@ -173,22 +167,37 @@ Then, on the slider:
 - Open your hand fully: the sim should be open, not slightly curled.
   Close it: it should close without saturating early.
 
-**`RECORD:` final scaling_factor = ________**
+Only then touch the rest, in this order:
 
-Only then touch the rest: `project_dist` (the gap at which a fingertip pair
-snaps together — raise it if pinches hover, lower it if fingers stick to each
-other), `eta1` (how close a snapped thumb-finger pinch gets), and `norm_delta`
-(smoother but laggier).
+| knob | what it fixes |
+|---|---|
+| `abduction_limit` | fingers leaning toward the thumb when you simply curl. Default 0.25 rad; 0 locks them parallel. Do not go below ~0.15 — the clipping becomes its own artifact. |
+| `project_dist` | the gap at which a fingertip pair snaps together. Raise it if pinches hover, **lower it (0 disables) if fingers stick to each other**. |
+| `eta1` | how close a snapped thumb-finger pinch gets. |
+| `norm_delta` | smoother but laggier. |
+| `thumb_vector_scale` | (advanced) a straighter thumb, at 1-3 mm of fingertip accuracy. |
+
+Then press **Capture neutral** with your hand in its rest pose, and save a
+preset. The preset carries the zero pose with it, so `--preset <name>`
+reproduces the session — but it does **not** record the mode, so always pass
+`--mode dexpilot` alongside it.
 
 Then A/B it honestly against `--mode analytic` on the same motion. Analytic is
 6x cheaper and rock-solid for curl; DexPilot is the one that gets relative
 fingertip placement right. Which you want depends on the task.
 
 **`TODO(hardware-day)` fingertip offsets.** DexPilot aims at the tip frames in
-`urdf.TIP_LINKS`, which are CAD estimates (`thumb_tip` at `0 -0.042 -0.010`,
+`urdf.TIP_LINKS`, which are CAD estimates (`thumb_tip` at `0 0.042 -0.010`,
 fingers at `0 0.036 -0.009`). In this mode they are load-bearing — a wrong
 offset means the solver optimises toward the wrong point. Measure them on the
 real hand and correct them.
+
+The thumb one was outright **wrong** until this session: the sign was inverted,
+putting `thumb_tip` 28 mm *closer* to the palm than the thumb DIP (cos −0.84
+against the distal direction, now +0.96). Every thumb measurement taken before
+that fix is void, including the one that concluded the thumb was too short —
+it is proportionally long. Worth re-measuring the magnitudes on the real hand
+even so.
 
 ### A6. Latency is honest  ☐
 

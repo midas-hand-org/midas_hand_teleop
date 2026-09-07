@@ -216,3 +216,7 @@ def main() -> None:
         cap.release()
         if args.show:
             cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()

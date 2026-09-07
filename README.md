@@ -21,9 +21,11 @@ pip install -e ".[manus,mujoco]"        # add `hardware` for the real hand
 ```
 
 The Manus SDK is proprietary and is **not** vendored here. The bridge binds it
-through `ctypes` and looks for `libManusSDK_Integrated.so` via `--sdk-lib`,
-`$MANUS_SDK_LIB`, `$MANUS_SDK_DIR`, the loader path, then `/usr/local/lib`.
-Everything except the live-glove path runs without it.
+through `ctypes` and looks for `libManusSDK_Integrated.so` in this order:
+`--sdk-lib`, `$MANUS_SDK_LIB`, `$MANUS_SDK_DIR/lib`, `/usr/local/lib`, then
+`/opt/ManusSDK/lib`. A `--sdk-lib` or `$MANUS_SDK_LIB` that points at nothing
+is an error rather than a fall-through to a different copy. Everything except
+the live-glove path runs without the SDK.
 
 ## Quickstart, no hardware at all
 
@@ -55,7 +57,8 @@ what you want day to day.
 ## Tuning UI
 
 ```bash
-python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &   # or: midas-manus-bridge &
+# a real glove: midas-manus-bridge &
+python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &
 midas-hand-tune --mode dexpilot --open
 ```
 
@@ -85,6 +88,22 @@ what percentage of each joint's travel the profile actually commands.
 ```bash
 midas-manus-bridge &                       # glove -> ZMQ
 midas-manus-teleop --backend mujoco --mujoco-viewer
+```
+
+Keys in the terminal while it runs:
+
+| key | |
+|---|---|
+| `c` | capture the current pose as the zero pose |
+| `r` | clear that calibration |
+| `s` | calibrate hand size from a held open pose (dexpilot only) |
+| `q` | quit |
+
+To run the profile you tuned, pass both the preset and the mode — a preset does
+not record which mode it was tuned in:
+
+```bash
+midas-manus-teleop --retarget dexpilot --preset my-hand --backend mujoco --mujoco-viewer
 ```
 
 Right hand only. `--side left` is refused rather than warned about: the
