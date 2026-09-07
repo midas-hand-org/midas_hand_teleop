@@ -250,7 +250,7 @@ def test_defaults_cover_every_control_the_ui_can_render():
                 assert control["path"] in schema["defaults"], control["path"]
 
 
-def test_saving_a_preset_keeps_the_solver_knobs(server, tmp_path):
+def test_saving_a_preset_keeps_the_solver_knobs(server):
     """Regression: the save path rebuilt the profile field by field and omitted
     `dexpilot=`, so every DexPilot solver knob an operator tuned was reset to
     defaults on save — under a "saved preset" confirmation."""
@@ -295,7 +295,7 @@ def test_saving_a_preset_captures_the_live_zero_pose(server, tmp_path):
     }
 
 
-def test_loading_a_preset_queues_its_zero_pose_for_the_loop(server, tmp_path):
+def test_loading_a_preset_queues_its_zero_pose_for_the_loop(server):
     """A preset is a complete artifact, so its calibration must be installed,
     not merely displayed. The loop applies it; the server may not touch the
     retargeter."""

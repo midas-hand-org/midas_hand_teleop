@@ -55,7 +55,7 @@ def test_explicit_filter_alpha_wins():
     assert resolve_filter_alpha(_args(filter_alpha=0.5)) == 0.5
 
 
-def test_nothing_is_commanded_before_the_first_glove_frame(tmp_path):
+def test_nothing_is_commanded_before_the_first_glove_frame():
     """last_control is seeded to every joint = 0.0 and last_data_time to the
     start, so for the first --stale-timeout seconds the loop used to command
     the all-zeros pose having received no glove frame at all.
