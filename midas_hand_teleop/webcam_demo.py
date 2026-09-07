@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import time
 
-import cv2
 from midas_hand_retargeter import MidasHandRetargeter
 from midas_hand_retargeter.adaptor import SUPPORTED_COUPLING_MODES
 from midas_hand_retargeter.tuning import DEFAULT_TUNING, RetargeterTuning
@@ -132,6 +131,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+
+    # Imported here, not at module scope: opencv and mediapipe are 252 MB and
+    # only the webcam path needs them, so they live in the [webcam] extra and
+    # the glove path installs without them.
+    try:
+        import cv2
+    except ImportError as exc:  # pragma: no cover - depends on what is installed
+        raise SystemExit(
+            "The webcam path needs opencv and mediapipe, which are not "
+            "installed. They are 252 MB and the glove path does not use them, "
+            "so they are an extra: pip install -e '.[webcam]'"
+        ) from exc
 
     camera = int(args.camera) if str(args.camera).isdigit() else args.camera
     cap = cv2.VideoCapture(camera)

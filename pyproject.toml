@@ -8,14 +8,18 @@ version = "0.1.0"
 description = "Manus-glove and webcam teleoperation for the MIDAS hand, in MuJoCo and on hardware"
 readme = "README.md"
 requires-python = ">=3.10"
+# Deliberately thin. The glove path -- which is the primary one and what runs
+# on hardware -- needs neither opencv nor mediapipe, and those two are 252 MB
+# between them, so they are the [webcam] extra rather than a required install.
 dependencies = [
-    "mediapipe>=0.10",
     "midas-hand-retargeter>=0.1.0",
     "numpy>=2.0",
-    "opencv-python>=4.8",
 ]
 
 [project.optional-dependencies]
+# midas-hand-teleop (the webcam entry point). detector.py already imports both
+# lazily; webcam_demo names the extra if they are missing.
+webcam = ["mediapipe>=0.10", "opencv-python>=4.8"]
 mujoco = ["mujoco>=3.0"]
 hardware = ["midas-hand>=0.1.0"]
 # Manus-glove -> MuJoCo pipeline (midas-manus-teleop). Fully self-contained — no

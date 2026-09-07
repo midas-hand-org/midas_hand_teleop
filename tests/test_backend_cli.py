@@ -167,3 +167,40 @@ def test_no_entry_point_silently_accepts_a_left_glove():
 
     with pytest.raises(SystemExit, match="Left-hand teleop is not implemented"):
         tuner_cli.main(["--side", "left", "--duration", "0.1"])
+
+
+def test_the_glove_path_does_not_need_opencv_or_mediapipe():
+    """They are 252 MB between them and only the webcam path uses them, so
+    they are the [webcam] extra. A module-level import anywhere on the glove
+    path would quietly make them required again."""
+
+    import subprocess
+    import sys
+
+    # A fresh interpreter, so nothing another test imported can mask this.
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys;"
+         "import midas_hand_teleop.tuner.cli;"
+         "import midas_hand_teleop.manus_glove.manus_teleop;"
+         "import midas_hand_teleop.backend_cli;"
+         "leaked = [m for m in ('cv2', 'mediapipe') if m in sys.modules];"
+         "print(leaked)"],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == "[]", (
+        f"the glove path imported {result.stdout.strip()} at module scope"
+    )
+
+
+def test_the_webcam_entry_point_names_the_extra_if_it_is_missing():
+    """Rather than an ImportError traceback on a 252 MB dependency."""
+
+    import inspect
+
+    from midas_hand_teleop import webcam_demo
+
+    source = inspect.getsource(webcam_demo.main)
+    assert "import cv2" in source, "cv2 must be imported lazily inside main()"
+    assert "[webcam]" in source

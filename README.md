@@ -20,6 +20,16 @@ pip install -e ../midas_hand_retargeter
 pip install -e ".[manus,mujoco]"        # add `hardware` for the real hand
 ```
 
+Extras, so a glove user does not pay for a webcam they are not using:
+
+| extra | for | size |
+|---|---|---|
+| `manus` | the Manus glove bridge and its ZMQ bus | small |
+| `mujoco` | the simulator | ~50 MB |
+| `tuner` | the browser tuning UI (same deps as `manus` + `mujoco`) | — |
+| `hardware` | the real hand, via `midas_hand_api` | small |
+| `webcam` | the MediaPipe webcam path only | ~252 MB |
+
 The Manus SDK is proprietary and is **not** vendored here. The bridge binds it
 through `ctypes` and looks for `libManusSDK_Integrated.so` in this order:
 `--sdk-lib`, `$MANUS_SDK_LIB`, `$MANUS_SDK_DIR/lib`, `/usr/local/lib`, then
