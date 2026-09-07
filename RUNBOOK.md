@@ -30,7 +30,10 @@ source midas_env/bin/activate        # or use midas_env/bin/... directly
 (cd midas_hand_teleop     && pytest -q)
 ```
 
-Expected: **152 passed** and **128 passed**. Was 29 + 49 before this work.
+Both green. The counts are deliberately not written down here: they change on
+every commit that adds a test, so a number in this file is wrong within a day
+and teaches the reader to ignore it. CI runs both suites plus ruff on every
+push.
 
 ### A1. The default install is clean  ☐
 
