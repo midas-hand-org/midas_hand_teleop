@@ -25,9 +25,7 @@ PARSER_MODULES = {
 }
 
 #: The bridge builds its parser inside main(), so its flags are read from source.
-BRIDGE_SOURCE = (
-    REPO / "midas_hand_teleop" / "midas_hand_teleop" / "manus_glove" / "manus_bridge.py"
-)
+BRIDGE_SOURCE = REPO / "midas_hand_teleop" / "midas_hand_teleop" / "manus_glove" / "manus_bridge.py"
 
 DOCS = (
     REPO / "midas_hand_teleop" / "README.md",
@@ -47,7 +45,9 @@ def cli_flags() -> dict[str, set[str]]:
         }
         for name, module in PARSER_MODULES.items()
     }
-    flags["midas-manus-bridge"] = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', BRIDGE_SOURCE.read_text()))
+    flags["midas-manus-bridge"] = set(
+        re.findall(r'"(--[a-z][a-z0-9-]*)"', BRIDGE_SOURCE.read_text())
+    )
     return flags
 
 

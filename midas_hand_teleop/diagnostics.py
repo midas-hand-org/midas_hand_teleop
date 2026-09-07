@@ -319,9 +319,7 @@ def cmd_live(args: argparse.Namespace) -> None:
     _print_analysis("live", kp, tuning)
 
 
-def _presets_on_frame(
-    kp: np.ndarray, tuning: RetargeterTuning, expect: str | None
-) -> None:
+def _presets_on_frame(kp: np.ndarray, tuning: RetargeterTuning, expect: str | None) -> None:
     expected = analyze_frame(_resolve_expect(expect), tuning)["targets"] if expect else None
     print("Frame preset comparison (apply each axis remap to the captured frame):\n")
     target_vectors = []

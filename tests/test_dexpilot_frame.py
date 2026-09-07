@@ -34,9 +34,7 @@ def test_dexpilot_is_rotation_invariant_but_chirality_sensitive():
     from midas_hand_teleop.manus_glove.fake_glove_publisher import synthetic_hand
 
     retargeter = MidasHandRetargeter.create(mode=DEXPILOT_MODE)
-    retargeter.profile = RetargetProfile().with_values(
-        {"dexpilot.scaling_factor": 1.1}
-    )
+    retargeter.profile = RetargetProfile().with_values({"dexpilot.scaling_factor": 1.1})
     landmarks = synthetic_hand(0.5)
 
     def solve(points):

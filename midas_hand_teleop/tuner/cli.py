@@ -53,50 +53,78 @@ logger = logging.getLogger("midas_hand_teleop.tuner")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="midas-hand-tune", description=__doc__,
+        prog="midas-hand-tune",
+        description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--side", default="right", choices=["right", "left"],
-                        help="Glove side to subscribe to (default: right).")
-    parser.add_argument("--host", default="localhost",
-                        help="Data-center host publishing glove keypoints.")
-    parser.add_argument("--no-proxy", action="store_true",
-                        help="Do not start the built-in XSUB/XPUB relay.")
+    parser.add_argument(
+        "--side",
+        default="right",
+        choices=["right", "left"],
+        help="Glove side to subscribe to (default: right).",
+    )
+    parser.add_argument(
+        "--host", default="localhost", help="Data-center host publishing glove keypoints."
+    )
+    parser.add_argument(
+        "--no-proxy", action="store_true", help="Do not start the built-in XSUB/XPUB relay."
+    )
 
     # The backend and hardware flags are shared with webcam_demo and
     # manus_teleop rather than redefined, so the safety defaults (disarmed,
     # current cap, slew limit, homing precondition) are the same everywhere.
     add_backend_arguments(parser, default="mujoco", include_mujoco=False)
-    parser.add_argument("--mujoco-viewer", action="store_true",
-                        help="Open the MuJoCo viewer alongside the browser UI.")
+    parser.add_argument(
+        "--mujoco-viewer",
+        action="store_true",
+        help="Open the MuJoCo viewer alongside the browser UI.",
+    )
     parser.add_argument("--xml-path", default=None, help="Override the MJCF path.")
-    parser.add_argument("--mujoco-repo", default=None,
-                        help="Path to midas_hand_mujoco, if not auto-discovered.")
+    parser.add_argument(
+        "--mujoco-repo", default=None, help="Path to midas_hand_mujoco, if not auto-discovered."
+    )
 
     parser.add_argument(
-        "--mode", default=ANALYTIC_MODE, choices=list(SUPPORTED_RETARGET_MODES),
+        "--mode",
+        default=ANALYTIC_MODE,
+        choices=list(SUPPORTED_RETARGET_MODES),
         help="Retargeting mode (default: analytic). Use 'dexpilot' to tune the "
-             "optimizer that controls fingertip positions relative to each "
-             "other — the thing the analytic map structurally cannot do. The "
-             "UI shows only the controls the chosen mode actually reads.",
+        "optimizer that controls fingertip positions relative to each "
+        "other — the thing the analytic map structurally cannot do. The "
+        "UI shows only the controls the chosen mode actually reads.",
     )
-    parser.add_argument("--profile", default="glove", choices=sorted(PROFILES),
-                        help="Starting tuning profile (default: glove).")
-    parser.add_argument("--preset", default=None,
-                        help="Load this preset file at startup instead of a profile.")
+    parser.add_argument(
+        "--profile",
+        default="glove",
+        choices=sorted(PROFILES),
+        help="Starting tuning profile (default: glove).",
+    )
+    parser.add_argument(
+        "--preset", default=None, help="Load this preset file at startup instead of a profile."
+    )
 
     parser.add_argument("--port", type=int, default=8765, help="HTTP port.")
-    parser.add_argument("--bind", default="127.0.0.1",
-                        help="HTTP bind address. Defaults to loopback; binding "
-                             "publicly exposes live control of a robot hand.")
+    parser.add_argument(
+        "--bind",
+        default="127.0.0.1",
+        help="HTTP bind address. Defaults to loopback; binding "
+        "publicly exposes live control of a robot hand.",
+    )
     parser.add_argument("--open", action="store_true", help="Open a browser tab.")
     parser.add_argument("--control-hz", type=float, default=60.0)
-    parser.add_argument("--duration", type=float, default=None,
-                        help="Exit after this many seconds (for smoke tests).")
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Exit after this many seconds (for smoke tests).",
+    )
     parser.add_argument("--log-level", default="INFO")
-    parser.add_argument("--log-file", default=None,
-                        help="Also write logs here. Without this, logs go only "
-                             "to stderr and a bare `> file` redirect captures nothing.")
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Also write logs here. Without this, logs go only "
+        "to stderr and a bare `> file` redirect captures nothing.",
+    )
     return parser
 
 
@@ -126,8 +154,12 @@ def build_state(args) -> TunerState:
     else:
         profile = RetargetProfile.from_legacy_tuning(tuning_for_source(args.profile))
         profile = RetargetProfile(
-            index=profile.index, middle=profile.middle, ring=profile.ring,
-            thumb=profile.thumb, name=args.profile, source=args.profile,
+            index=profile.index,
+            middle=profile.middle,
+            ring=profile.ring,
+            thumb=profile.thumb,
+            name=args.profile,
+            source=args.profile,
         )
     state = TunerState(store=ProfileStore(profile))
     if state_neutral:
@@ -155,10 +187,18 @@ def main(argv=None) -> int:
         webbrowser.open(url)
 
     loop = TunerLoop(
-        state, retargeter, backend,
-        LoopConfig(side=args.side, host=args.host, control_hz=args.control_hz,
-                   duration_s=args.duration, start_proxy=not args.no_proxy),
+        state,
+        retargeter,
+        backend,
+        LoopConfig(
+            side=args.side,
+            host=args.host,
+            control_hz=args.control_hz,
+            duration_s=args.duration,
+            start_proxy=not args.no_proxy,
+        ),
     )
+
     def drop_torque():
         """The one thing that must happen on every exit path."""
 

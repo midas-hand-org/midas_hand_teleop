@@ -67,7 +67,9 @@ def loop_factory():
     def make(backend, **config):
         state = TunerState(store=ProfileStore(RetargetProfile()))
         loop = TunerLoop(
-            state, retargeter=None, backend=backend,
+            state,
+            retargeter=None,
+            backend=backend,
             config=LoopConfig(start_proxy=False, **config),
         )
         made.append(loop)
@@ -208,11 +210,11 @@ def test_watchdog_disarms_when_the_browser_goes_away(loop_factory):
     state.loop.armed = True
     loop._service_arming()
 
-    state.snapshot()                      # a browser polls
+    state.snapshot()  # a browser polls
     loop._service_client_watchdog()
     assert state.loop.armed is True
 
-    state._last_client_poll -= 5.0        # ...and then stops
+    state._last_client_poll -= 5.0  # ...and then stops
     loop._service_client_watchdog()
     assert state.loop.armed is False
     assert loop.backend.disarm_calls == 1
@@ -266,5 +268,6 @@ def test_command_scale_cannot_push_past_a_mechanical_stop():
     result = type("R", (), {"hardware_motor_positions": at_limit.copy()})()
     target = _bare_backend(command_scale=3.0)._prepare_target(result)
     assert np.allclose(target, at_limit), "scaled past the lower stop"
-    assert np.allclose(result.hardware_motor_positions, at_limit), \
+    assert np.allclose(result.hardware_motor_positions, at_limit), (
         "_prepare_target must not scale the caller's array in place"
+    )

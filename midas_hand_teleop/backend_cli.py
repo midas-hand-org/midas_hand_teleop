@@ -52,53 +52,78 @@ def add_backend_arguments(
 
     group = parser.add_argument_group("backend")
     group.add_argument(
-        "--backend", choices=BACKEND_CHOICES, default=default,
-        help=f"Where joint commands go (default: {default}). 'hardware' moves "
-             "the real hand.",
+        "--backend",
+        choices=BACKEND_CHOICES,
+        default=default,
+        help=f"Where joint commands go (default: {default}). 'hardware' moves the real hand.",
     )
     if include_mujoco:
         group.add_argument("--mujoco-xml", default=None, help="Override the MJCF path.")
-        group.add_argument("--mujoco-repo", default=None,
-                           help="Path to midas_hand_mujoco if not auto-discovered.")
-        group.add_argument("--mujoco-viewer", action="store_true",
-                           help="Open the MuJoCo passive viewer.")
-        group.add_argument("--mujoco-steps", type=int, default=None,
-                           help="Physics steps per frame (default: derived from the "
-                                "control rate so the sim runs near real time).")
+        group.add_argument(
+            "--mujoco-repo", default=None, help="Path to midas_hand_mujoco if not auto-discovered."
+        )
+        group.add_argument(
+            "--mujoco-viewer", action="store_true", help="Open the MuJoCo passive viewer."
+        )
+        group.add_argument(
+            "--mujoco-steps",
+            type=int,
+            default=None,
+            help="Physics steps per frame (default: derived from the "
+            "control rate so the sim runs near real time).",
+        )
 
     hardware = parser.add_argument_group("hardware")
     hardware.add_argument(
-        "--configure-hardware", action=argparse.BooleanOptionalAction, default=True,
+        "--configure-hardware",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Write operating mode, gains and the current cap at startup. This "
-             "is also the only call that disables torque first, so turning it "
-             "off leaves motors from a crashed run live.",
+        "is also the only call that disables torque first, so turning it "
+        "off leaves motors from a crashed run live.",
     )
-    hardware.add_argument("--hardware-config", default=None,
-                          help="Calibration config (default: ~/.midas_hand/config.yaml).")
     hardware.add_argument(
-        "--hardware-port", default=DEFAULT_HARDWARE_PORT,
+        "--hardware-config",
+        default=None,
+        help="Calibration config (default: ~/.midas_hand/config.yaml).",
+    )
+    hardware.add_argument(
+        "--hardware-port",
+        default=DEFAULT_HARDWARE_PORT,
         help="Serial port. Default: auto-discover, the same way homing does.",
     )
     hardware.add_argument("--hardware-baudrate", type=int, default=None)
-    hardware.add_argument("--hardware-current-limit", type=int,
-                          default=DEFAULT_HARDWARE_CURRENT_LIMIT,
-                          help="Goal current cap in mA. Start low on first bring-up.")
-    hardware.add_argument("--hardware-command-scale", type=float,
-                          default=DEFAULT_HARDWARE_COMMAND_SCALE,
-                          help="Scale commands around calibrated zero; 0.3-0.5 for bring-up.")
-    hardware.add_argument("--hardware-max-step-rad", type=float,
-                          default=DEFAULT_HARDWARE_MAX_STEP_RAD,
-                          help="Slew limit per hardware tick, radians. 0 disables it.")
-    hardware.add_argument("--hardware-rate-hz", type=float, default=DEFAULT_HARDWARE_RATE_HZ)
-    hardware.add_argument("--hardware-interpolation-alpha", type=float,
-                          default=DEFAULT_HARDWARE_INTERPOLATION_ALPHA)
     hardware.add_argument(
-        "--allow-unhomed", action="store_true",
-        help="Permit --backend hardware with no saved homing calibration. "
-             "Unsafe: joint limits are unenforced and the zero is undefined.",
+        "--hardware-current-limit",
+        type=int,
+        default=DEFAULT_HARDWARE_CURRENT_LIMIT,
+        help="Goal current cap in mA. Start low on first bring-up.",
     )
     hardware.add_argument(
-        "--start-armed", action="store_true",
+        "--hardware-command-scale",
+        type=float,
+        default=DEFAULT_HARDWARE_COMMAND_SCALE,
+        help="Scale commands around calibrated zero; 0.3-0.5 for bring-up.",
+    )
+    hardware.add_argument(
+        "--hardware-max-step-rad",
+        type=float,
+        default=DEFAULT_HARDWARE_MAX_STEP_RAD,
+        help="Slew limit per hardware tick, radians. 0 disables it.",
+    )
+    hardware.add_argument("--hardware-rate-hz", type=float, default=DEFAULT_HARDWARE_RATE_HZ)
+    hardware.add_argument(
+        "--hardware-interpolation-alpha", type=float, default=DEFAULT_HARDWARE_INTERPOLATION_ALPHA
+    )
+    hardware.add_argument(
+        "--allow-unhomed",
+        action="store_true",
+        help="Permit --backend hardware with no saved homing calibration. "
+        "Unsafe: joint limits are unenforced and the zero is undefined.",
+    )
+    hardware.add_argument(
+        "--start-armed",
+        action="store_true",
         help="Enable torque immediately instead of waiting to be armed.",
     )
 
@@ -205,14 +230,14 @@ def _serial_port_hint() -> str:
 
 def _build_hardware_backend(args):
     return HardwareBackend(
-            configure=args.configure_hardware,
-            config_path=args.hardware_config,
-            port=args.hardware_port,
-            baudrate=args.hardware_baudrate,
-            current_limit_ma=args.hardware_current_limit,
-            command_scale=args.hardware_command_scale,
-            max_step_rad=args.hardware_max_step_rad,
-            update_rate_hz=args.hardware_rate_hz,
-            interpolation_alpha=args.hardware_interpolation_alpha,
-            start_armed=getattr(args, "start_armed", False),
-        )
+        configure=args.configure_hardware,
+        config_path=args.hardware_config,
+        port=args.hardware_port,
+        baudrate=args.hardware_baudrate,
+        current_limit_ma=args.hardware_current_limit,
+        command_scale=args.hardware_command_scale,
+        max_step_rad=args.hardware_max_step_rad,
+        update_rate_hz=args.hardware_rate_hz,
+        interpolation_alpha=args.hardware_interpolation_alpha,
+        start_armed=getattr(args, "start_armed", False),
+    )

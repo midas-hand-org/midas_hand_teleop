@@ -88,8 +88,12 @@ def synthetic_hand(curl: float) -> np.ndarray:
         bend = np.array([base_dir[0], base_dir[1] * math.cos(angle), -math.sin(angle)])
         pts.append(pts[-1] + _SEG_LEN * bend)
         angle += extra
-    kp[1], kp[2], kp[3], kp[4] = cmc, pts[1], pts[2], pts[2] + _SEG_LEN * np.array(
-        [base_dir[0], base_dir[1] * math.cos(angle), -math.sin(angle)]
+    kp[1], kp[2], kp[3], kp[4] = (
+        cmc,
+        pts[1],
+        pts[2],
+        pts[2]
+        + _SEG_LEN * np.array([base_dir[0], base_dir[1] * math.cos(angle), -math.sin(angle)]),
     )
     return kp
 

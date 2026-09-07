@@ -66,9 +66,7 @@ class TunerLoop:
             start_data_center_proxy()
             time.sleep(0.3)  # PUB/SUB slow joiner
 
-        self.subscriber = GloveSubscriber(
-            GLOVE_TOPIC.format(side=config.side), config.host
-        )
+        self.subscriber = GloveSubscriber(GLOVE_TOPIC.format(side=config.side), config.host)
         self._last_frame_monotonic = 0.0
         self._frame_intervals: list[float] = []
         self._last_landmarks: np.ndarray | None = None

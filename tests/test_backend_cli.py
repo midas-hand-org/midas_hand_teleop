@@ -21,9 +21,14 @@ from midas_hand_teleop.manus_glove.manus_teleop import _Control
 
 def _args(**overrides):
     base = dict(
-        backend="hardware", hardware_config=None, allow_unhomed=False,
-        start_armed=False, mujoco_xml=None, mujoco_repo=None,
-        mujoco_viewer=False, mujoco_steps=None,
+        backend="hardware",
+        hardware_config=None,
+        allow_unhomed=False,
+        start_armed=False,
+        mujoco_xml=None,
+        mujoco_repo=None,
+        mujoco_viewer=False,
+        mujoco_steps=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -86,12 +91,25 @@ def test_left_hand_is_refused_rather_than_warned():
 
     from midas_hand_teleop.manus_glove import manus_teleop
 
-    args = argparse.Namespace(side="left", retarget="full", calibrate_delay=0.0,
-                              preset=None,
-                              profile="glove", filter_alpha=None, host="localhost")
-    for name in ("finger_curl_gain", "finger_abad_gain", "finger_smoothing_alpha",
-                 "thumb_cmc_gain", "thumb_cmc_side_gain", "thumb_cmc_roll_gain",
-                 "thumb_flexion_gain", "thumb_smoothing_alpha"):
+    args = argparse.Namespace(
+        side="left",
+        retarget="full",
+        calibrate_delay=0.0,
+        preset=None,
+        profile="glove",
+        filter_alpha=None,
+        host="localhost",
+    )
+    for name in (
+        "finger_curl_gain",
+        "finger_abad_gain",
+        "finger_smoothing_alpha",
+        "thumb_cmc_gain",
+        "thumb_cmc_side_gain",
+        "thumb_cmc_roll_gain",
+        "thumb_flexion_gain",
+        "thumb_smoothing_alpha",
+    ):
         setattr(args, name, None)
     with pytest.raises(SystemExit, match="Left-hand teleop is not implemented"):
         manus_teleop.run(args)
@@ -105,8 +123,12 @@ def test_dead_cli_flags_are_gone():
     from midas_hand_teleop import webcam_demo
 
     source = inspect.getsource(webcam_demo)
-    for flag in ("--thumb-pinch-gain", "--thumb-cmc-roll-signed",
-                 "--finger-abad-limit", "--thumb-cmc-side-oppose"):
+    for flag in (
+        "--thumb-pinch-gain",
+        "--thumb-cmc-roll-signed",
+        "--finger-abad-limit",
+        "--thumb-cmc-side-oppose",
+    ):
         assert flag not in source, f"{flag} names behaviour that does not exist"
     assert "argparse.SUPPRESS" not in source
 
@@ -130,8 +152,13 @@ def test_every_entry_point_can_actually_arm_hardware():
         ("midas-hand-tune", tuner_parser()),
     ):
         args = parser.parse_args([])
-        for flag in ("start_armed", "allow_unhomed", "hardware_current_limit",
-                     "hardware_max_step_rad", "configure_hardware"):
+        for flag in (
+            "start_armed",
+            "allow_unhomed",
+            "hardware_current_limit",
+            "hardware_max_step_rad",
+            "configure_hardware",
+        ):
             assert hasattr(args, flag), f"{name} is missing --{flag.replace('_', '-')}"
         assert args.start_armed is False, f"{name} arms by default"
         assert "hardware" in parser.parse_args(["--backend", "hardware"]).backend
@@ -179,14 +206,19 @@ def test_the_glove_path_does_not_need_opencv_or_mediapipe():
 
     # A fresh interpreter, so nothing another test imported can mask this.
     result = subprocess.run(
-        [sys.executable, "-c",
-         "import sys;"
-         "import midas_hand_teleop.tuner.cli;"
-         "import midas_hand_teleop.manus_glove.manus_teleop;"
-         "import midas_hand_teleop.backend_cli;"
-         "leaked = [m for m in ('cv2', 'mediapipe') if m in sys.modules];"
-         "print(leaked)"],
-        capture_output=True, text=True, timeout=180,
+        [
+            sys.executable,
+            "-c",
+            "import sys;"
+            "import midas_hand_teleop.tuner.cli;"
+            "import midas_hand_teleop.manus_glove.manus_teleop;"
+            "import midas_hand_teleop.backend_cli;"
+            "leaked = [m for m in ('cv2', 'mediapipe') if m in sys.modules];"
+            "print(leaked)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
     assert result.returncode == 0, result.stderr[-2000:]
     assert result.stdout.strip() == "[]", (

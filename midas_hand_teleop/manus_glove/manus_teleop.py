@@ -151,9 +151,7 @@ class _EmaFilter:
         for name, value in targets.items():
             prev = self._values.get(name)
             self._values[name] = (
-                float(value)
-                if prev is None
-                else prev + self.alpha * (float(value) - prev)
+                float(value) if prev is None else prev + self.alpha * (float(value) - prev)
             )
         return dict(self._values)
 
@@ -184,20 +182,14 @@ def build_tuning(args: argparse.Namespace):
         from midas_hand_retargeter import presets
 
         profile, neutral = presets.load(args.preset)
-        logger.info(
-            "Loaded preset %s (%d neutral offsets)", args.preset, len(neutral)
-        )
+        logger.info("Loaded preset %s (%d neutral offsets)", args.preset, len(neutral))
         if args.scaling_factor is not None:
-            profile = profile.with_values(
-                {"dexpilot.scaling_factor": args.scaling_factor}
-            )
+            profile = profile.with_values({"dexpilot.scaling_factor": args.scaling_factor})
         return profile, neutral
 
     base = tuning_for_source(args.profile)
     overrides = {
-        name: getattr(args, name)
-        for name in _GAIN_ARGS
-        if getattr(args, name) is not None
+        name: getattr(args, name) for name in _GAIN_ARGS if getattr(args, name) is not None
     }
     return (replace(base, **overrides) if overrides else base), {}
 
@@ -245,9 +237,7 @@ def _poll_console_key() -> str | None:
     return line[0] if line else None
 
 
-def build_retargeter(
-    args: argparse.Namespace, tuning: RetargeterTuning
-) -> MidasHandRetargeter:
+def build_retargeter(args: argparse.Namespace, tuning: RetargeterTuning) -> MidasHandRetargeter:
     """Build the ``MidasHandRetargeter`` for the selected ``--retarget`` mode.
 
     The same one the webcam and hardware pipelines use, so tuning here carries
@@ -323,9 +313,7 @@ def run(args: argparse.Namespace) -> None:
             f"thumb_pp={args.thumb_postprocess}, "
             f"coupling={config.coupling_mode}"
         )
-    logger.info(
-        "Retargeting mode: %s (%s) (%s)", config.mode, source, detail
-    )
+    logger.info("Retargeting mode: %s (%s) (%s)", config.mode, source, detail)
 
     # Relay so the bridge (PUB->5710) reaches our subscriber (SUB<-5711). Returns
     # False if the ports are already bound (real data center or a stale process).
@@ -361,10 +349,12 @@ def run(args: argparse.Namespace) -> None:
         if not args.gravity:
             backend.model.opt.gravity[:] = 0.0
         logger.info(
-            "MIDAS MuJoCo loaded (nq=%d, nu=%d), control=%.0f Hz, steps/frame=%d, "
-            "gravity=%s",
-            backend.model.nq, backend.model.nu, args.control_hz,
-            backend.steps_per_frame, args.gravity,
+            "MIDAS MuJoCo loaded (nq=%d, nu=%d), control=%.0f Hz, steps/frame=%d, gravity=%s",
+            backend.model.nq,
+            backend.model.nu,
+            args.control_hz,
+            backend.steps_per_frame,
+            args.gravity,
         )
 
     # --- glove subscriber (minimal raw ZMQ; see glove_subscriber.GloveSubscriber) ---
@@ -375,9 +365,7 @@ def run(args: argparse.Namespace) -> None:
     logger.info(
         "Smoothing: glove EMA alpha=%.2f%s",
         filter_alpha,
-        " (off; retargeter smooths internally)"
-        if filter_alpha >= 1.0
-        else "",
+        " (off; retargeter smooths internally)" if filter_alpha >= 1.0 else "",
     )
     if args.calibrate_delay > 0:
         logger.info(
@@ -470,9 +458,7 @@ def run(args: argparse.Namespace) -> None:
                     " (ports 5710/5711 already bound but nothing is relaying — kill "
                     "any stale publisher/driver: `pkill -f manus_teleop`)"
                 )
-        logger.info(
-            "solves=%d (%.0f Hz) parse_fail=%d%s", solves, rate, parse_failures, hint
-        )
+        logger.info("solves=%d (%.0f Hz) parse_fail=%d%s", solves, rate, parse_failures, hint)
         last_report = now
 
     def release_zmq() -> None:
@@ -514,9 +500,7 @@ def run(args: argparse.Namespace) -> None:
             logger.info("Type a key then Enter: %s", keys)
         has_viewer = getattr(backend, "viewer", None) is not None
         if has_viewer:
-            logger.info(
-                "Viewer open — move your gloved hand. Ctrl-C or close window to stop."
-            )
+            logger.info("Viewer open — move your gloved hand. Ctrl-C or close window to stop.")
         elif args.duration:
             logger.info("Running for %.0fs (no viewer)...", args.duration)
         else:
@@ -562,7 +546,8 @@ def run(args: argparse.Namespace) -> None:
                         "No glove data for %.1fs (> --stale-timeout %.1fs) — "
                         "stopped commanding, and dropping torque if armed. The "
                         "hand goes limp; re-arm to resume.",
-                        stale_s, args.stale_timeout,
+                        stale_s,
+                        args.stale_timeout,
                     )
                     disarm = getattr(backend, "disarm", None)
                     if callable(disarm):
@@ -620,8 +605,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--host",
         default=os.environ.get("MIDAS_DATA_CENTER_HOST", "localhost"),
-        help="Data-center host to subscribe to (default: $MIDAS_DATA_CENTER_HOST or "
-        "localhost)",
+        help="Data-center host to subscribe to (default: $MIDAS_DATA_CENTER_HOST or localhost)",
     )
     # --- Retargeting ---
     parser.add_argument(
@@ -697,7 +681,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--mujoco-viewer", action="store_true", help="Launch the MuJoCo passive viewer"
     )
     parser.add_argument(
-        "--duration", type=float, default=None,
+        "--duration",
+        type=float,
+        default=None,
         help="Stop after this many seconds. Applies with or without a viewer.",
     )
     parser.add_argument(
@@ -711,8 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--steps-per-frame",
         type=int,
         default=0,
-        help="MuJoCo steps per control tick (0 = auto from --control-hz for "
-        "near-real-time sim).",
+        help="MuJoCo steps per control tick (0 = auto from --control-hz for near-real-time sim).",
     )
     parser.add_argument(
         "--filter-alpha",
@@ -743,15 +728,15 @@ def build_parser() -> argparse.ArgumentParser:
     # MuJoCo model location (else MIDAS_HAND_MUJOCO_DIR / sibling repo discovery).
     add_backend_arguments(parser, default="mujoco", include_mujoco=False)
     parser.add_argument(
-        "--stale-timeout", type=float, default=0.5,
+        "--stale-timeout",
+        type=float,
+        default=0.5,
         help="Stop commanding if no glove frame arrives for this long (s). "
-             "0 disables the deadman. On hardware this is what prevents leaning "
-             "on an object forever after the publisher dies.",
+        "0 disables the deadman. On hardware this is what prevents leaning "
+        "on an object forever after the publisher dies.",
     )
     parser.add_argument("--xml-path", default=None, help="Explicit MJCF path override")
-    parser.add_argument(
-        "--mujoco-repo", default=None, help="Path to the midas_hand_mujoco repo"
-    )
+    parser.add_argument("--mujoco-repo", default=None, help="Path to the midas_hand_mujoco repo")
     # Coarse tuning gains. Default None => inherit from --profile; set to override.
     parser.add_argument("--finger-curl-gain", type=float, default=None)
     parser.add_argument("--finger-abad-gain", type=float, default=None)

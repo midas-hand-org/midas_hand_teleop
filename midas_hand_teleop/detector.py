@@ -238,10 +238,7 @@ class MediaPipeHandDetector:
         import cv2
 
         height, width = bgr.shape[:2]
-        points = [
-            (int(landmark.x * width), int(landmark.y * height))
-            for landmark in landmarks
-        ]
+        points = [(int(landmark.x * width), int(landmark.y * height)) for landmark in landmarks]
         for start, end in self._connections or []:
             cv2.line(bgr, points[start], points[end], (255, 255, 255), 2)
         for point in points:

@@ -48,7 +48,7 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, float]] = {
     "scaling_factor": (0.5, 2.5, 0.01),
     "huber_delta": (0.005, 0.15, 0.005),
     "norm_delta": (0.0, 0.05, 0.0005),
-    "project_dist": (0.0, 0.10, 0.001),   # 0 disables pinch snapping entirely
+    "project_dist": (0.0, 0.10, 0.001),  # 0 disables pinch snapping entirely
     "escape_dist": (0.01, 0.15, 0.001),
     "eta1": (0.0, 0.05, 0.0005),
     "eta2": (0.0, 0.10, 0.001),
@@ -111,8 +111,7 @@ HELP: dict[str, str] = {
     "dip_max_bend": "Thumb bend (rad) meaning fully flexed at the tip.",
     "mcp_range": "Commanded thumb MCP open/closed angles.",
     "dip_range": "Commanded thumb tip open/closed angles.",
-    "dip_follows_mcp": "Floor tying tip curl to MCP curl, for when the IP bend "
-    "is poorly seen.",
+    "dip_follows_mcp": "Floor tying tip curl to MCP curl, for when the IP bend is poorly seen.",
     "cmc_side_gain": "Multiplies the thumb's in-plane side sweep.",
     "cmc_side_range": "Commanded limits for thumb side sweep.",
     "cmc_side_neutral_angle": "Measured angle treated as the thumb's rest pose.",
@@ -175,8 +174,8 @@ SECTION_PARAMS: dict[str, type] = {
 #: Shown when a mode reads none of the sections the UI can edit.
 _MODE_NOTES = {
     "vector": "mode=vector is the pure palm-rooted optimizer. It exposes no "
-              "tunable parameters here — switch to dexpilot to tune the solver, "
-              "or analytic to tune per-finger response.",
+    "tunable parameters here — switch to dexpilot to tune the solver, "
+    "or analytic to tune per-finger response.",
 }
 
 
@@ -202,9 +201,7 @@ def _describe_field(section: str, field, model: HandModel) -> dict:
     return entry
 
 
-def build_schema(
-    model: HandModel = MIDAS_RIGHT_HAND, mode: str = "analytic"
-) -> dict:
+def build_schema(model: HandModel = MIDAS_RIGHT_HAND, mode: str = "analytic") -> dict:
     """UI description for one retargeting mode.
 
     Only the sections the mode actually reads are returned. A slider that
@@ -233,8 +230,6 @@ def build_schema(
         "defaults": defaults.to_flat_dict(),
         "joints": [
             {"name": name, "lower": float(low), "upper": float(high)}
-            for name, (low, high) in (
-                (n, model.limits(n)) for n in model.joint_names
-            )
+            for name, (low, high) in ((n, model.limits(n)) for n in model.joint_names)
         ],
     }

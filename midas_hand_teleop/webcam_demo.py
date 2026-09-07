@@ -21,10 +21,7 @@ DEFAULT_SHOW = True
 
 
 def _compact_joint_values(values: dict[str, float]) -> dict[str, float]:
-    return {
-        name: round(value, 3)
-        for name, value in values.items()
-    }
+    return {name: round(value, 3) for name, value in values.items()}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -107,12 +104,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scaling-factor", type=float, default=1.15)
     parser.add_argument("--finger-curl-gain", type=float, default=DEFAULT_TUNING.finger_curl_gain)
     parser.add_argument("--finger-abad-gain", type=float, default=DEFAULT_TUNING.finger_abad_gain)
-    parser.add_argument("--finger-smoothing-alpha", type=float, default=DEFAULT_TUNING.finger_smoothing_alpha)
+    parser.add_argument(
+        "--finger-smoothing-alpha", type=float, default=DEFAULT_TUNING.finger_smoothing_alpha
+    )
     parser.add_argument("--thumb-cmc-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_gain)
-    parser.add_argument("--thumb-cmc-side-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_side_gain)
-    parser.add_argument("--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain)
-    parser.add_argument("--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain)
-    parser.add_argument("--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha)
+    parser.add_argument(
+        "--thumb-cmc-side-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_side_gain
+    )
+    parser.add_argument(
+        "--thumb-cmc-roll-gain", type=float, default=DEFAULT_TUNING.thumb_cmc_roll_gain
+    )
+    parser.add_argument(
+        "--thumb-flexion-gain", type=float, default=DEFAULT_TUNING.thumb_flexion_gain
+    )
+    parser.add_argument(
+        "--thumb-smoothing-alpha", type=float, default=DEFAULT_TUNING.thumb_smoothing_alpha
+    )
     parser.add_argument(
         "--debug-targets",
         action=argparse.BooleanOptionalAction,
@@ -207,8 +214,7 @@ def main() -> None:
                     else:
                         offsets = pipeline.calibrate_neutral_from_last_frame()
                         print(
-                            "Captured retargeter neutral offsets: "
-                            f"{_compact_joint_values(offsets)}"
+                            f"Captured retargeter neutral offsets: {_compact_joint_values(offsets)}"
                         )
                 if key == ord("r"):
                     pipeline.clear_neutral_offsets()

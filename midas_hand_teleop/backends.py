@@ -24,8 +24,7 @@ class TeleopBackend(Protocol):
     callers gate on their presence (see ``TunerLoop.hardware_available``).
     """
 
-    def send(self, result: RetargetingResult) -> None:
-        ...
+    def send(self, result: RetargetingResult) -> None: ...
 
     def measured(self) -> dict[str, float]:
         """Latest measured joint positions, keyed by JOINT NAME.
@@ -37,8 +36,7 @@ class TeleopBackend(Protocol):
         Returns an empty dict when the backend cannot measure anything.
         """
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 @dataclass
@@ -56,10 +54,7 @@ class PrintBackend:
         if now - self._last_print < self.interval_s:
             return
         self._last_print = now
-        compact = {
-            name: round(value, 3)
-            for name, value in result.active_joint_positions.items()
-        }
+        compact = {name: round(value, 3) for name, value in result.active_joint_positions.items()}
         print(compact)
 
     def close(self) -> None:
@@ -115,9 +110,7 @@ class MujocoBackend:
             )
             if joint_id < 0:
                 continue
-            measured[joint_name] = float(
-                self.data.qpos[self.model.jnt_qposadr[joint_id]]
-            )
+            measured[joint_name] = float(self.data.qpos[self.model.jnt_qposadr[joint_id]])
         return measured
 
     def close(self) -> None:
@@ -128,7 +121,9 @@ class MujocoBackend:
         names = []
         for actuator_id in range(self.model.nu):
             joint_id = int(self.model.actuator_trnid[actuator_id, 0])
-            names.append(self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_JOINT, joint_id))
+            names.append(
+                self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_JOINT, joint_id)
+            )
         return names
 
     def _find_actuator_for_joint(self, joint_name: str) -> int:
@@ -356,12 +351,10 @@ class HardwareBackend:
         names = [HARDWARE_MOTOR_JOINT_NAMES[i] for i in self.hand.motor_ids]
         with self._lock:
             self._measured = {
-                name: float(value)
-                for name, value in zip(names, positions, strict=True)
+                name: float(value) for name, value in zip(names, positions, strict=True)
             }
             self._measured_current_ma = {
-                name: float(value)
-                for name, value in zip(names, currents, strict=True)
+                name: float(value) for name, value in zip(names, currents, strict=True)
             }
             self._measured_seq += 1
             self._measured_monotonic = time.monotonic()
@@ -503,16 +496,14 @@ class HardwareBackend:
             return limits
 
         signs = dict(zip(config.motor_ids, config.joint_signs, strict=False))
-        for motor_id, _name, cad_offset, direction in (
-            *THUMB_HOMING_TABLE, *FINGER_HOMING_TABLE
-        ):
+        for motor_id, _name, cad_offset, direction in (*THUMB_HOMING_TABLE, *FINGER_HOMING_TABLE):
             if motor_id >= len(limits):
                 continue
             sign = float(signs.get(motor_id, 1.0))
             stop = -float(cad_offset) * sign
-            if direction * sign < 0:   # driven toward the lower bound
+            if direction * sign < 0:  # driven toward the lower bound
                 limits[motor_id, 0] = max(limits[motor_id, 0], stop + cls._STOP_MARGIN_RAD)
-            else:                      # driven toward the upper bound
+            else:  # driven toward the upper bound
                 limits[motor_id, 1] = min(limits[motor_id, 1], stop - cls._STOP_MARGIN_RAD)
         # A margin must never invert a bound on a joint with almost no travel.
         crossed = limits[:, 0] > limits[:, 1]

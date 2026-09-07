@@ -27,8 +27,12 @@ MODULES = {
 
 #: Set on the namespace at runtime rather than by add_argument.
 ALLOWED_EXTRA = {
-    "midas-hand-teleop": {"finger_smoothing_alpha", "thumb_smoothing_alpha",
-                          "thumb_flexion_gain", "lock_input_hand"},
+    "midas-hand-teleop": {
+        "finger_smoothing_alpha",
+        "thumb_smoothing_alpha",
+        "thumb_flexion_gain",
+        "lock_input_hand",
+    },
 }
 
 

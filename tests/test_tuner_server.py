@@ -180,7 +180,10 @@ def test_schema_is_mode_aware():
     vector = build_schema(mode="vector")
 
     assert [s["name"] for s in analytic["sections"]] == [
-        "thumb", "index", "middle", "ring",
+        "thumb",
+        "index",
+        "middle",
+        "ring",
     ]
     assert [s["name"] for s in dexpilot["sections"]] == ["dexpilot"]
     assert vector["sections"] == []
@@ -191,9 +194,7 @@ def test_dexpilot_schema_leads_with_scaling_factor():
     """It is the load-bearing knob, so it must not be hidden behind 'advanced'."""
 
     controls = {
-        c["name"]: c
-        for s in build_schema(mode="dexpilot")["sections"]
-        for c in s["controls"]
+        c["name"]: c for s in build_schema(mode="dexpilot")["sections"] for c in s["controls"]
     }
     assert controls["scaling_factor"]["advanced"] is False
     assert "hand size" in controls["scaling_factor"]["help"].lower()
@@ -256,11 +257,17 @@ def test_saving_a_preset_keeps_the_solver_knobs(server):
     defaults on save — under a "saved preset" confirmation."""
 
     state, base = server
-    post(base, "/api/profile", {"updates": {
-        "dexpilot.scaling_factor": 1.33,
-        "dexpilot.thumb_vector_scale": 1.15,
-        "index.curl_gain": 1.7,
-    }})
+    post(
+        base,
+        "/api/profile",
+        {
+            "updates": {
+                "dexpilot.scaling_factor": 1.33,
+                "dexpilot.thumb_vector_scale": 1.15,
+                "index.curl_gain": 1.7,
+            }
+        },
+    )
     post(base, "/api/presets/save", {"name": "solver"})
     post(base, "/api/profile/reset", {})
 
@@ -290,9 +297,7 @@ def test_saving_a_preset_captures_the_live_zero_pose(server, tmp_path):
     post(base, "/api/presets/save", {"name": "zero"})
 
     saved = json.loads((tmp_path / "zero.json").read_text())
-    assert saved["neutral_offsets"] == {
-        "index_pip_joint": -0.12, "thumb_mcp_joint": -0.34
-    }
+    assert saved["neutral_offsets"] == {"index_pip_joint": -0.12, "thumb_mcp_joint": -0.34}
 
 
 def test_loading_a_preset_queues_its_zero_pose_for_the_loop(server):

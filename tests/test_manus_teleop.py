@@ -70,10 +70,21 @@ def test_nothing_is_commanded_before_the_first_glove_frame():
     import sys
 
     result = subprocess.run(
-        [sys.executable, "-m", "midas_hand_teleop.manus_glove.manus_teleop",
-         "--backend", "print", "--retarget", "full",
-         "--duration", "2", "--no-proxy"],
-        capture_output=True, text=True, timeout=120,
+        [
+            sys.executable,
+            "-m",
+            "midas_hand_teleop.manus_glove.manus_teleop",
+            "--backend",
+            "print",
+            "--retarget",
+            "full",
+            "--duration",
+            "2",
+            "--no-proxy",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     combined = result.stdout + result.stderr
     assert "total solves=0" in combined, combined[-2000:]
@@ -114,9 +125,7 @@ def test_scaling_factor_flag_overrides_the_preset(tmp_path):
         tmp_path / "t.json",
         RetargetProfile().with_values({"dexpilot.scaling_factor": 1.42}),
     )
-    profile, _ = build_tuning(
-        _args(preset=str(tmp_path / "t.json"), scaling_factor=1.05)
-    )
+    profile, _ = build_tuning(_args(preset=str(tmp_path / "t.json"), scaling_factor=1.05))
     assert profile.dexpilot.scaling_factor == 1.05
 
 

@@ -71,9 +71,7 @@ class GloveSubscriber:
         array, _ = self.poll_latest_with_metadata(timeout_ms)
         return array
 
-    def poll_latest_with_metadata(
-        self, timeout_ms: int = 0
-    ) -> tuple[np.ndarray | None, dict]:
+    def poll_latest_with_metadata(self, timeout_ms: int = 0) -> tuple[np.ndarray | None, dict]:
         """Like :meth:`poll_latest`, but also return the user-metadata frame.
 
         Frame 2 of the wire format carries the publisher's monotonic stamp, so

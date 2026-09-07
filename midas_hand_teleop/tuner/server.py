@@ -87,7 +87,7 @@ class TunerRequestHandler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 return self._serve_static("index.html")
             if path.startswith("/static/"):
-                return self._serve_static(path[len("/static/"):])
+                return self._serve_static(path[len("/static/") :])
             if path == "/api/schema":
                 # Mode-specific: the browser must not render controls the
                 # running mode ignores.
@@ -243,8 +243,6 @@ def serve_in_background(state, *, host: str = "127.0.0.1", port: int = 8765, pre
     """Start the server on a daemon thread and return it."""
 
     server = make_server(state, host=host, port=port, preset_dir=preset_dir)
-    thread = threading.Thread(
-        target=server.serve_forever, name="midas-tuner-http", daemon=True
-    )
+    thread = threading.Thread(target=server.serve_forever, name="midas-tuner-http", daemon=True)
     thread.start()
     return server

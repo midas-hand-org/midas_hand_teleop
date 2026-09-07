@@ -72,7 +72,7 @@ def make_backend(monkeypatch):
 
     def make(hand, **kwargs):
         monkeypatch.setattr(midas_hand_api, "MidasHand", lambda **kw: hand)
-        kwargs.setdefault("update_rate_hz", 0.0)   # no thread unless asked
+        kwargs.setdefault("update_rate_hz", 0.0)  # no thread unless asked
         kwargs.setdefault("configure", False)
         backend = HardwareBackend(**kwargs)
         built.append(backend)

@@ -74,8 +74,9 @@ def test_protected_shutdown_absorbs_an_interrupt_and_restores_the_handler():
 def test_second_interrupt_forces_exit():
     """A genuinely stuck teardown must not hold the terminal hostage."""
 
-    script = textwrap.dedent(
-        """
+    script = (
+        textwrap.dedent(
+            """
         import logging, os, signal, sys, time
         sys.path.insert(0, %r)
         from midas_hand_teleop.shutdown import protected_shutdown
@@ -86,7 +87,9 @@ def test_second_interrupt_forces_exit():
             time.sleep(5)
             print("NOT REACHED")
         """
-    ) % os.getcwd()
+        )
+        % os.getcwd()
+    )
 
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
@@ -139,8 +142,8 @@ def test_force_exit_drops_torque_first(monkeypatch):
         logging.getLogger("test"), before_force_exit=lambda: dropped.append(True)
     ):
         handler = signal.getsignal(signal.SIGINT)
-        handler(signal.SIGINT, None)   # first: absorbed
+        handler(signal.SIGINT, None)  # first: absorbed
         assert dropped == []
-        handler(signal.SIGINT, None)   # second: force quit
+        handler(signal.SIGINT, None)  # second: force quit
     assert dropped == [True], "torque must be dropped before the force exit"
     assert exited == [shutdown_module.SIGINT_EXIT_CODE]

@@ -478,8 +478,7 @@ def resolve_glove_frame(name: str | None) -> tuple[str, np.ndarray]:
         return chosen, GLOVE_FRAME_PRESETS[chosen]
     except KeyError:
         raise ValueError(
-            f"Unknown glove frame {chosen!r}; expected one of "
-            f"{sorted(GLOVE_FRAME_PRESETS)}"
+            f"Unknown glove frame {chosen!r}; expected one of {sorted(GLOVE_FRAME_PRESETS)}"
         ) from None
 
 
@@ -536,8 +535,10 @@ def resolve_sdk_library(explicit: str | None = None) -> str | None:
     # An explicitly named path is a statement of intent, so a missing one is an
     # error rather than a reason to search on. Falling through would silently
     # load a different SDK than the one asked for.
-    for label, named in (("--sdk-lib", explicit),
-                         ("$MANUS_SDK_LIB", os.environ.get("MANUS_SDK_LIB"))):
+    for label, named in (
+        ("--sdk-lib", explicit),
+        ("$MANUS_SDK_LIB", os.environ.get("MANUS_SDK_LIB")),
+    ):
         if named:
             expanded = os.path.expanduser(named)
             if not os.path.exists(expanded):

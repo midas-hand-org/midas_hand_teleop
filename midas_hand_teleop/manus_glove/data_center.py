@@ -130,8 +130,7 @@ def start_data_center_proxy() -> bool:
         backend.bind(f"tcp://*:{DATA_OUTPUT_PORT}")
     except zmq.ZMQError as e:
         logger.info(
-            "Not starting built-in proxy (ports %d/%d busy: %s) — assuming a data "
-            "center is up",
+            "Not starting built-in proxy (ports %d/%d busy: %s) — assuming a data center is up",
             DATA_SOURCE_PORT,
             DATA_OUTPUT_PORT,
             e,
