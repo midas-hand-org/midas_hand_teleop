@@ -86,7 +86,7 @@ def test_left_hand_is_refused_rather_than_warned():
 
     from midas_hand_teleop.manus_glove import manus_teleop
 
-    args = argparse.Namespace(side="left", retarget="geometric", calibrate_delay=0.0,
+    args = argparse.Namespace(side="left", retarget="full", calibrate_delay=0.0,
                               preset=None,
                               profile="glove", filter_alpha=None, host="localhost")
     for name in ("finger_curl_gain", "finger_abad_gain", "finger_smoothing_alpha",

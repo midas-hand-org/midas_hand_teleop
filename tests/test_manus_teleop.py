@@ -44,19 +44,15 @@ def test_gain_flag_overrides_only_that_field():
     assert tuned.finger_smoothing_alpha == base.finger_smoothing_alpha
 
 
-def test_filter_alpha_full_mode_defaults_off():
-    # Full retargeter smooths internally -> no extra glove-side EMA by default.
-    assert resolve_filter_alpha(_args(), full_mode=True, tuning=glove_tuning()) == 1.0
+def test_filter_alpha_defaults_off():
+    """The retargeter smooths internally from the profile, so a second
+    glove-side EMA stage would double-smooth."""
 
-
-def test_filter_alpha_geometric_mode_uses_profile():
-    g = glove_tuning()
-    assert resolve_filter_alpha(_args(), full_mode=False, tuning=g) == g.finger_smoothing_alpha
+    assert resolve_filter_alpha(_args()) == 1.0
 
 
 def test_explicit_filter_alpha_wins():
-    assert resolve_filter_alpha(_args(filter_alpha=0.5), full_mode=True, tuning=glove_tuning()) == 0.5
-    assert resolve_filter_alpha(_args(filter_alpha=0.5), full_mode=False, tuning=glove_tuning()) == 0.5
+    assert resolve_filter_alpha(_args(filter_alpha=0.5)) == 0.5
 
 
 def test_nothing_is_commanded_before_the_first_glove_frame(tmp_path):
@@ -75,7 +71,7 @@ def test_nothing_is_commanded_before_the_first_glove_frame(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-m", "midas_hand_teleop.manus_glove.manus_teleop",
-         "--backend", "print", "--retarget", "geometric",
+         "--backend", "print", "--retarget", "full",
          "--duration", "2", "--no-proxy"],
         capture_output=True, text=True, timeout=120,
     )

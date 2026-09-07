@@ -21,18 +21,14 @@ Single-process pipeline:
 Mapping (``--retarget``):
 
 * ``full`` (default) — the same ``MidasHandRetargeter`` the webcam/hardware
-  pipeline uses: keypoints are rotated into the MANO frame, then
-  ``retarget_landmarks`` runs the dex_retargeting NLopt vector optimizer, the
-  MIDAS geometric postprocess (finger curl / thumb opposition), neutral
-  calibration, and PIP-DIP coupling. Tuning transfers to the real robot. Knobs:
+  pipeline uses, in its ``analytic`` mode: the geometric landmark->joint map
+  (finger curl / thumb opposition), neutral calibration, and PIP-DIP
+  coupling. Tuning transfers to the real robot. Knobs:
   ``--profile`` (glove/vision base tuning), ``--scaling-factor``,
   ``--no-finger-postprocess`` / ``--no-thumb-postprocess`` (set both to let the
   pure optimizer drive the joints), ``--coupling-mode``, ``--calibrate-delay``
   (ON by default for the glove — hold an open hand at startup), and the
   finger/thumb gains (which override the profile).
-
-* ``geometric`` — the lightweight direct map from the first milestone: call the
-  postprocess functions on their own (no optimizer, no IK), rotation-invariant.
 
 The default postprocess path is invariant to the input coordinate frame (any
 rotation/reflection); if the glove tracks poorly the cause is the keypoint
@@ -86,10 +82,6 @@ from midas_hand_retargeter.constants import (
 )
 from midas_hand_retargeter.human import mediapipe_world_to_mano_landmarks
 from midas_hand_retargeter.postprocess import as_profile as tuning_profile
-from midas_hand_retargeter.postprocess import (
-    finger_joint_targets_from_landmarks,
-    thumb_joint_targets_from_landmarks,
-)
 from midas_hand_retargeter.tuning import (
     PROFILES,
     RetargeterTuning,
@@ -126,7 +118,7 @@ class _Control:
     ``MujocoBackend.send`` reads ``active_joint_positions`` (name -> radians),
     but ``HardwareBackend`` reads ``hardware_motor_positions`` — a 13-vector in
     motor order, which is thumb-first and therefore NOT the same ordering. The
-    geometric path used to provide only the former, so any hardware send from
+    an earlier direct-map path provided only the former, so any hardware send from
     it raised AttributeError.
     """
 
@@ -142,36 +134,11 @@ class _Control:
         )
 
 
-def landmarks_to_joint_targets(
-    keypoints: np.ndarray,
-    tuning: RetargeterTuning,
-    *,
-    mano_frame: bool,
-    side: str,
-) -> dict[str, float]:
-    """Geometric 21x3 keypoints -> 13 MIDAS active-joint targets (radians).
-
-    ``mano_frame`` optionally rotates the keypoints into the wrist-centered MANO
-    frame first (parity with the webcam path). The geometric functions build
-    their own palm basis and are rotation-invariant, so this is OFF by default:
-    it changes the output only up to numerical noise while adding the SVD
-    sign-flip instability inside ``estimate_frame_from_hand_points``.
-    """
-    landmarks = keypoints
-    if mano_frame:
-        hand_type = "Right" if side == "right" else "Left"
-        landmarks = mediapipe_world_to_mano_landmarks(keypoints, hand_type=hand_type)
-    targets: dict[str, float] = {}
-    targets.update(finger_joint_targets_from_landmarks(landmarks, tuning))
-    targets.update(thumb_joint_targets_from_landmarks(landmarks, tuning))
-    return targets
-
-
 class _EmaFilter:
     """Per-joint exponential smoother for the 13-value command vector.
 
     ``alpha`` is the usual low-pass coefficient: 1.0 = no filtering (instant),
-    smaller = smoother but laggier. The bare geometric functions do not apply the
+    smaller = smoother but laggier. The analytic map does not apply the
     smoothing in ``RetargeterTuning`` (the retargeter wrapper does), so we smooth
     here instead.
     """
@@ -235,19 +202,15 @@ def build_tuning(args: argparse.Namespace):
     return (replace(base, **overrides) if overrides else base), {}
 
 
-def resolve_filter_alpha(
-    args: argparse.Namespace, full_mode: bool, tuning: RetargeterTuning
-) -> float:
+def resolve_filter_alpha(args: argparse.Namespace) -> float:
     """Resolve the glove-side EMA alpha, avoiding double smoothing.
 
-    In ``full`` mode the ``MidasHandRetargeter`` already applies per-joint EMA
-    smoothing (from the tuning profile), so the default here is 1.0 (no extra
-    stage). In ``geometric`` mode the bare postprocess functions do not smooth, so
-    the default is the profile's finger smoothing alpha. An explicit
-    ``--filter-alpha`` always wins, with a warning if it would double-smooth.
+    The retargeter already applies per-joint EMA smoothing from the tuning
+    profile, so the default here is 1.0 -- no extra stage. An explicit
+    ``--filter-alpha`` wins, with a warning that it double-smooths.
     """
     if args.filter_alpha is not None:
-        if full_mode and args.filter_alpha < 1.0:
+        if args.filter_alpha < 1.0:
             logger.warning(
                 "--filter-alpha %.2f stacks on the retargeter's internal smoothing "
                 "(double smoothing). Full mode already smooths via the profile; use "
@@ -255,7 +218,7 @@ def resolve_filter_alpha(
                 args.filter_alpha,
             )
         return args.filter_alpha
-    return 1.0 if full_mode else tuning.finger_smoothing_alpha
+    return 1.0
 
 
 def _poll_console_key() -> str | None:
@@ -284,13 +247,11 @@ def _poll_console_key() -> str | None:
 
 def build_retargeter(
     args: argparse.Namespace, tuning: RetargeterTuning
-) -> MidasHandRetargeter | None:
-    """Build the full ``MidasHandRetargeter`` for ``--retarget full``, else None.
+) -> MidasHandRetargeter:
+    """Build the ``MidasHandRetargeter`` for the selected ``--retarget`` mode.
 
-    ``None`` selects the lightweight geometric direct-map path. The full
-    retargeter is the same one the webcam/hardware pipeline uses (optimizer +
-    geometric postprocess + neutral calibration + PIP-DIP coupling), so tuning
-    here carries over to the real robot.
+    The same one the webcam and hardware pipelines use, so tuning here carries
+    over to the real robot.
     """
     if args.retarget == "dexpilot":
         logger.info(
@@ -305,11 +266,6 @@ def build_retargeter(
             coupling_mode=args.coupling_mode,
             tuning=tuning,
         )
-
-    if args.retarget != "full":
-        if args.calibrate_delay > 0:
-            logger.warning("--calibrate-delay needs --retarget full; ignoring it.")
-        return None
 
     # Turning the analytic layer off has always meant "let the optimizer drive",
     # which is now a named mode. Translate rather than fail: under the analytic
@@ -341,38 +297,35 @@ def run(args: argparse.Namespace) -> None:
     glove_topic = GLOVE_TOPIC.format(side=args.side)
     host = args.host
     tuning, preset_neutral = build_tuning(args)
-    retargeter = build_retargeter(args, tuning)  # None => geometric direct-map
-    if retargeter is not None and preset_neutral:
+    retargeter = build_retargeter(args, tuning)
+    if preset_neutral:
         # A preset carries the zero pose it was captured with; installing it is
         # the other half of reproducing that session.
         retargeter.set_neutral_offsets(preset_neutral)
         logger.info("Applied the preset's zero pose (%d joints)", len(preset_neutral))
     hand_type = "Right" if args.side == "right" else "Left"
-    if retargeter is None:
-        logger.info("Retargeting mode: %s (profile=%s)", args.retarget, args.profile)
-    else:
-        # Report what the retargeter RESOLVED, not what was asked for. The
-        # Cartesian modes override the coupling default, and dexpilot ignores
-        # scaling/finger_pp/thumb_pp entirely -- printing those as if they were
-        # in force is how an operator comes to believe a dead knob is live.
-        source = f"preset={args.preset}" if args.preset else f"profile={args.profile}"
-        config = retargeter.config
-        if args.retarget == "dexpilot":
-            detail = (
-                f"scaling={retargeter.profile.dexpilot.scaling_factor:.2f}, "
-                f"abduction_limit={retargeter.profile.dexpilot.abduction_limit:.2f}, "
-                f"coupling={config.coupling_mode}"
-            )
-        else:
-            detail = (
-                f"scaling={config.scaling_factor:.2f}, "
-                f"finger_pp={args.finger_postprocess}, "
-                f"thumb_pp={args.thumb_postprocess}, "
-                f"coupling={config.coupling_mode}"
-            )
-        logger.info(
-            "Retargeting mode: %s (%s) (%s)", config.mode, source, detail
+    # Report what the retargeter RESOLVED, not what was asked for. The Cartesian
+    # modes override the coupling default, and dexpilot ignores
+    # scaling/finger_pp/thumb_pp entirely -- printing those as if they were in
+    # force is how an operator comes to believe a dead knob is live.
+    source = f"preset={args.preset}" if args.preset else f"profile={args.profile}"
+    config = retargeter.config
+    if args.retarget == "dexpilot":
+        detail = (
+            f"scaling={retargeter.profile.dexpilot.scaling_factor:.2f}, "
+            f"abduction_limit={retargeter.profile.dexpilot.abduction_limit:.2f}, "
+            f"coupling={config.coupling_mode}"
         )
+    else:
+        detail = (
+            f"scaling={config.scaling_factor:.2f}, "
+            f"finger_pp={args.finger_postprocess}, "
+            f"thumb_pp={args.thumb_postprocess}, "
+            f"coupling={config.coupling_mode}"
+        )
+    logger.info(
+        "Retargeting mode: %s (%s) (%s)", config.mode, source, detail
+    )
 
     # Relay so the bridge (PUB->5710) reaches our subscriber (SUB<-5711). Returns
     # False if the ports are already bound (real data center or a stale process).
@@ -418,15 +371,15 @@ def run(args: argparse.Namespace) -> None:
     sub = GloveSubscriber(glove_topic, host)
     logger.info("Subscribed to %s on %s:%d", glove_topic, host, DATA_OUTPUT_PORT)
 
-    filter_alpha = resolve_filter_alpha(args, retargeter is not None, tuning)
+    filter_alpha = resolve_filter_alpha(args)
     logger.info(
         "Smoothing: glove EMA alpha=%.2f%s",
         filter_alpha,
         " (off; retargeter smooths internally)"
-        if retargeter is not None and filter_alpha >= 1.0
+        if filter_alpha >= 1.0
         else "",
     )
-    if retargeter is not None and args.calibrate_delay > 0:
+    if args.calibrate_delay > 0:
         logger.info(
             "Neutral calibration ON: hold a relaxed OPEN hand for the first %.1fs "
             "— that pose becomes MIDAS zero.",
@@ -446,10 +399,6 @@ def run(args: argparse.Namespace) -> None:
 
     def compute_targets(keypoints: np.ndarray) -> dict[str, float]:
         """Map one (21,3) keypoint frame to the 13 active-joint targets."""
-        if retargeter is None:
-            return landmarks_to_joint_targets(
-                keypoints, tuning, mano_frame=args.mano_frame, side=args.side
-            )
         # DexPilot compares 3D vectors (palm->tip and tip->tip) against the
         # robot's own frame, so it is orientation-sensitive in a way nothing
         # else here is. The MANO frame is a different convention, and rotating
@@ -467,7 +416,7 @@ def run(args: argparse.Namespace) -> None:
     def maybe_calibrate_neutral() -> None:
         """After --calibrate-delay s of data, capture the held pose as neutral."""
         nonlocal calibrated
-        if calibrated or retargeter is None or args.calibrate_delay <= 0:
+        if calibrated or args.calibrate_delay <= 0:
             return
         if last_data_time - start < args.calibrate_delay:
             return
@@ -558,7 +507,7 @@ def run(args: argparse.Namespace) -> None:
 
     next_tick = time.monotonic()
     try:
-        if sys.stdin and sys.stdin.isatty() and retargeter is not None:
+        if sys.stdin and sys.stdin.isatty():
             keys = "c = capture neutral, r = clear, q = quit"
             if args.retarget == "dexpilot":
                 keys = "c = capture neutral, s = calibrate hand size, r = clear, q = quit"
@@ -579,7 +528,7 @@ def run(args: argparse.Namespace) -> None:
             if has_viewer and not viewer_running():
                 break
             key = _poll_console_key()
-            if key and retargeter is not None:
+            if key:
                 if key == "c":
                     try:
                         retargeter.calibrate_neutral_from_last_frame()
@@ -696,12 +645,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--retarget",
-        choices=["full", "geometric", "dexpilot"],
+        choices=["full", "dexpilot"],
         default="full",
-        help="full = MidasHandRetargeter (optimizer + postprocess + neutral + "
-        "coupling, same as webcam/hardware); geometric = lightweight direct map; "
-        "dexpilot = optimizer over inter-fingertip vectors, which is the only "
-        "mode that controls where the fingertips sit relative to each other.",
+        help="full = the analytic geometric map plus neutral calibration and "
+        "PIP-DIP coupling, same as webcam/hardware; dexpilot = optimizer over "
+        "inter-fingertip vectors, the only mode that controls where the "
+        "fingertips sit relative to each other, and what glove teleop wants.",
     )
     parser.add_argument(
         "--scaling-factor",
@@ -716,14 +665,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="finger_postprocess",
         action="store_false",
         help="(full) let the optimizer drive the FINGER joints instead of the "
-        "geometric curl/splay heuristic.",
+        "analytic curl/splay heuristic.",
     )
     parser.add_argument(
         "--no-thumb-postprocess",
         dest="thumb_postprocess",
         action="store_false",
         help="(full) let the optimizer drive the THUMB joints instead of the "
-        "geometric opposition heuristic.",
+        "analytic opposition heuristic.",
     )
     parser.set_defaults(finger_postprocess=True, thumb_postprocess=True)
     parser.add_argument(
@@ -771,7 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="EMA low-pass on the 13-joint vector: higher = less lag (1.0 = none). "
         "Default: full mode -> 1.0 (the retargeter smooths internally; tune the "
-        "profile's *_smoothing_alpha), geometric mode -> the profile's finger alpha. "
+        "profile's *_smoothing_alpha). "
         "Setting <1.0 in full mode double-smooths (a warning fires).",
     )
     parser.add_argument(
@@ -781,13 +730,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable gravity (default: gravity on)",
     )
     parser.set_defaults(gravity=True)
-    parser.add_argument(
-        "--mano-frame",
-        action="store_true",
-        help="(geometric mode only) rotate keypoints into the MANO frame first. Off "
-        "by default — the geometric map is rotation-invariant. The full retargeter "
-        "always uses the MANO frame.",
-    )
     parser.add_argument(
         "--no-proxy",
         action="store_true",
