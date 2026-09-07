@@ -268,20 +268,45 @@ cannot read `zmz`.
 
 ```bash
 ls -l /dev/serial/by-id/                # the adapter should appear here
+cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer     # must be 1, not 16
+
 python -c "
-from midas_hand_api import MidasHand
-h = MidasHand()
+from midas_hand_api import MidasHand, HandConfig, DEFAULT_CONFIG_PATH
+h = MidasHand(config=HandConfig.load(DEFAULT_CONFIG_PATH))
 print('port:', h.port)
 print('ping:', h.ping())
-print('models:', h.verify_models())
+print('model mismatches:', h.verify_models())
+print('read_ok:', h.last_read_ok)
 h.close()
 "
 ```
 
-Expected: 13 motors answer, all model 1710. The port is discovered, not
-assumed — `--hardware-port` exists but you should not need it.
+Expected: `ping` lists 13 motors at model 1710, and **`verify_models()` returns
+`{}`** — it reports *mismatches*, so empty is the pass. `read_ok` must be True:
+a False there means the sync read fell back to cached data, and
+`HardwareBackend` refuses to arm on it for good reason.
+
+Pass `config=HandConfig.load(...)` as shown. A bare `MidasHand()` uses the
+default zero calibration, so `read_pos()` returns raw encoder angles (~3 rad on
+every motor) that look alarming and mean nothing. `HardwareBackend` loads the
+saved config itself; only ad-hoc scripts need this.
+
+**The FTDI latency timer is per-adapter.** `setup_dynamixel_latency.sh` writes a
+udev rule matched on the adapter's *serial*, so a different U2D2 comes up at the
+default **16 ms** and no rule fires. At 16 ms a single sync read takes 16.0 ms
+against a 20 ms control period, so the 50 Hz command loop cannot keep up: it
+runs at roughly 30 Hz, the slew limit becomes ~1.5 rad/s instead of 2.5, and
+measured positions lag. Fix it for the adapter you actually have:
+
+```bash
+cd /home/dyna/midas/midas_hand_api
+./setup_dynamixel_latency.sh /dev/serial/by-id/<your-adapter>   # persistent, needs sudo
+# or, just for this session:
+echo 1 | sudo tee /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
+```
 
 **`RECORD:` any motor that did not answer = ______________**
+**`RECORD:` adapter serial and latency_timer = ______________**
 
 ### B2. Home the hand  ☐ — **already done**
 
