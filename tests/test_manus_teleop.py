@@ -53,3 +53,31 @@ def test_filter_alpha_geometric_mode_uses_profile():
 def test_explicit_filter_alpha_wins():
     assert resolve_filter_alpha(_args(filter_alpha=0.5), full_mode=True, tuning=glove_tuning()) == 0.5
     assert resolve_filter_alpha(_args(filter_alpha=0.5), full_mode=False, tuning=glove_tuning()) == 0.5
+
+
+def test_nothing_is_commanded_before_the_first_glove_frame(tmp_path):
+    """last_control is seeded to every joint = 0.0 and last_data_time to the
+    start, so for the first --stale-timeout seconds the loop used to command
+    the all-zeros pose having received no glove frame at all.
+
+    On hardware that is uncommanded motion at power-on: arm() seeds from the
+    measured pose, the next tick asks for URDF zero, and the slew limiter walks
+    the whole hand there in ~0.3 s -- inside the deadman window, so the deadman
+    fires only after the motion has finished.
+    """
+
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "midas_hand_teleop.manus_glove.manus_teleop",
+         "--backend", "print", "--retarget", "geometric",
+         "--duration", "2", "--no-proxy"],
+        capture_output=True, text=True, timeout=120,
+    )
+    combined = result.stdout + result.stderr
+    assert "total solves=0" in combined, combined[-2000:]
+    # PrintBackend prints the joint dict on every send. No send, no dict.
+    assert "index_mcp_pitch_joint" not in combined, (
+        "commanded a pose with no glove frame:\n" + combined[-2000:]
+    )

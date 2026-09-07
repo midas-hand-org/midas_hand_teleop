@@ -25,7 +25,7 @@ source midas_env/bin/activate        # or use midas_env/bin/... directly
 (cd midas_hand_teleop     && pytest -q)
 ```
 
-Expected: **110 passed** and **68 passed**. Was 29 + 49 before this work.
+Expected: **142 passed** and **105 passed**. Was 29 + 49 before this work.
 
 ### A1. The default install is clean  ☐
 
@@ -220,131 +220,176 @@ python -c "import sys; from midas_hand_retargeter.adaptor import PIP_DIP_LOOKUP_
 
 ## Part B — hardware day (the real hand)
 
+**Status: homing is done.** `~/.midas_hand/config.yaml` holds 13 motors with
+per-motor home offsets, all `joint_signs` `+1.0`. So B2 below is complete and
+`--backend hardware` will start. Go straight to B1 → B4.
+
 Do these strictly in order. Each is a stop-gate: if one fails, stop.
+
+### B0. The 60-second version  ☐
+
+If you only read one block, read this one. It is the whole path, at bring-up
+settings, with nothing energised until you click a button in the browser:
+
+```bash
+# glove -> ZMQ
+midas-manus-bridge &
+
+# sim first: confirm the retargeting is the one you tuned
+midas-hand-tune --mode dexpilot --preset zmz --mujoco-viewer --open
+
+# then the real hand, low and slow. Starts DISARMED.
+midas-hand-tune --mode dexpilot --preset zmz --backend hardware --open \
+    --hardware-current-limit 150 \
+    --hardware-command-scale 0.3 \
+    --hardware-max-step-rad 0.05
+```
+
+Then press **Arm hardware** in the browser. Press it again, close the tab, kill
+the bridge, or Ctrl-C to stop — all four drop torque.
+
+Why the tuner and not `midas-manus-teleop`: it is the only entry point that
+loads a preset, so it is the only one that runs the settings you actually
+tuned. `midas-manus-teleop --backend hardware` runs the **analytic** map at
+library defaults unless you also pass `--retarget dexpilot`, and even then it
+cannot read `zmz`.
 
 ### B1. Bus and motors  ☐
 
 ```bash
-cd midas_hand_api
-./setup_dynamixel_latency.sh          # needs sudo; sets the FTDI latency timer to 1
+ls -l /dev/serial/by-id/                # the adapter should appear here
 python -c "
 from midas_hand_api import MidasHand
 h = MidasHand()
+print('port:', h.port)
 print('ping:', h.ping())
 print('models:', h.verify_models())
 h.close()
 "
 ```
 
-Expected: 13 motors answer, all model 1710.
+Expected: 13 motors answer, all model 1710. The port is discovered, not
+assumed — `--hardware-port` exists but you should not need it.
+
 **`RECORD:` any motor that did not answer = ______________**
 
-### B2. Home the hand  ☐  ← **blocks everything below**
+### B2. Home the hand  ☐ — **already done**
 
-`~/.midas_hand/config.yaml` does not exist on this machine, so the hand has
-never been homed here. Until it does, motor zero has no defined relationship to
-URDF zero and the API's joint-limit clamp is a no-op — which is why
-`--backend hardware` refuses to start.
+`~/.midas_hand/config.yaml` exists. Redo it only if the hand has been
+disassembled or a motor replaced:
 
 ```bash
 python -m midas_hand_api --home        # or --home-thumb / --home-fingers
-ls -l ~/.midas_hand/config.yaml
 ```
 
-**`RECORD:` homing offsets written = ______________**
+Note what homing writes for joint limits: **±π on every joint**, which makes
+`MidasHand.clip_positions` a no-op. Commands are therefore bounded by the
+retargeter's own model limits, applied in `HardwareBackend._prepare_target`
+before anything reaches a motor. That is the only thing standing between a
+`--hardware-command-scale` typo and a mechanical stop.
 
-### B3. Settle the PIP four-bar sign  ☐  ← **`TODO(hardware-day)`**
+### B3. The PIP four-bar sign  ☐ — **settled, no hardware needed**
 
-The two packages disagree, both self-consistently:
+This was carried as a stop-gate on the belief that the two packages held
+opposite conventions. They do not. The comparison had been made against the
+wrong function.
 
-| | convention |
-|---|---|
-| `midas_hand_retargeter.coupling.LookupPassiveCoupling` | `pip_to_lookup_sign = -1.0` |
-| `midas_hand_api.kinematics.pip_to_dip_position` | no sign flip |
+`midas_hand_api` exposes the same lookup table twice:
 
-The retargeter's convention matches a settled MJCF loop to 3.8e-3 rad, but the
-hardware path uses the other one. Measure, do not guess:
+| function | takes | flips sign |
+|---|---|---|
+| `pip_to_dip_position` | lookup-space PIP (**positive**) | no |
+| `passive_dip_from_pip_motor` | motor-space PIP (**negative in flexion**) | yes |
 
-```bash
-python -c "
-from midas_hand_api import MidasHand
-import numpy as np, time
-h = MidasHand(); h.configure()
-q = np.zeros(13); q[4] = -0.90          # index PIP, motor index 4
-h.set_positions_blocking(q, timeout_s=3)
-time.sleep(0.5)
-print('measured 16-DOF joint vector:', np.round(h.read_joint_pos(), 4))
-h.shutdown()
-"
-```
+A hardware angle is motor-space, so the second is the only correct
+comparison — and against it `LookupPassiveCoupling` matches to **1e-6** across
+the whole range:
 
-Compare the measured **index DIP** against the two predictions:
+| PIP (motor) | −0.20 | −0.50 | −0.90 | −1.20 | −1.45 |
+|---|---|---|---|---|---|
+| both packages → DIP | −0.4758 | −0.9787 | −1.4509 | −1.7173 | −1.9054 |
 
-- retargeter convention → **−1.4509 rad**
-- api convention → run `pip_to_dip_position(-0.90)` and record it
+Feeding a motor-space (negative) angle to `pip_to_dip_position` falls below the
+table's domain and clamps to `0.0`, which is what looked like a sign
+disagreement and was really a unit error.
 
-**`RECORD:` measured index DIP at PIP −0.90 = ________ rad**
-**`RECORD:` which convention matches = ______________**
-
-Then make it one shared implementation — do not leave two, and do not add a
-third. Also note the lookup table's domain is `[0, 1.3963]` while the URDF PIP
-range is `[-1.45, 0]`, so the last 0.054 rad is clamped.
+It could not have reached a motor in any case: the finger DIPs are passive
+four-bar links with no servo, so they are absent from
+`HARDWARE_MOTOR_JOINT_NAMES`. Pinned by
+`midas_hand_retargeter/tests/test_coupling_agrees_with_hardware.py`.
 
 ### B4. Glove → real hand, low and slow  ☐
 
 ```bash
-# 1. targets look sane, nothing energised
-midas-manus-teleop --backend print --duration 10
+midas-manus-bridge &
 
-# 2. sim tracks you
-midas-manus-teleop --backend mujoco --mujoco-viewer --duration 30
+# 1. nothing energised: just look at the numbers
+midas-hand-tune --mode dexpilot --preset zmz --backend print --duration 20
 
-# 3. hardware, disarmed: connects, configures, torque OFF
-midas-manus-teleop --backend hardware \
-    --hardware-current-limit 150 --hardware-command-scale 0.3 --duration 20
+# 2. sim tracks you, with the tuned profile
+midas-hand-tune --mode dexpilot --preset zmz --mujoco-viewer --open
 
-# 4. hardware, armed
-midas-manus-teleop --backend hardware \
-    --hardware-current-limit 150 --hardware-command-scale 0.3 --start-armed
+# 3. the hand, disarmed: connects, configures, torque OFF
+midas-hand-tune --mode dexpilot --preset zmz --backend hardware --open \
+    --hardware-current-limit 150 --hardware-command-scale 0.3 \
+    --hardware-max-step-rad 0.05
 ```
 
-Check, in order:
+Step 3 starts disarmed. Before pressing **Arm hardware**, check the status bar:
+glove connected, a sane rate, `backend HardwareBackend`. Then arm, and check in
+this order:
 
 - **no jump on arming.** The first commanded pose is the measured pose by
-  construction; if a finger snaps, stop and report it.
-- **disarm actually drops torque** — the fingers should go limp, not just stop
-  updating.
-- **command scale.** Raise 0.3 → 0.5 → 1.0 only once each step looks right.
-  **`RECORD:` highest safe command scale = ________**
-- **current limit.** Raise from 150 mA only as needed.
-  **`RECORD:` working current limit = ________ mA**
-
-### B5. Deadman  ☐
-
-Mid-session, kill the bridge:
-
-```bash
-pkill -f midas-manus-bridge
-```
-
-Expected within 0.5 s: `No glove data for 0.5s (> --stale-timeout 0.5s) —
-holding position and disarming if armed.` The hand must stop commanding, not
-keep leaning on whatever it was touching.
-
-### B6. Tuner against hardware  ☐
-
-```bash
-midas-hand-tune --open        # then use the Arm button
-```
-
-- **cmd vs meas rows line up finger-for-finger.** A mismatch here means the
+  construction; if a finger snaps, disarm and report it.
+- **direction.** Curl one finger. If the robot extends, stop — that is a sign
+  convention, not a tuning problem.
+- **cmd vs meas rows line up finger-for-finger.** A mismatch means the
   thumb-first motor order and index-first joint order got crossed — the exact
   bug the name-keyed `measured()` API exists to prevent.
-- Retune the per-finger ranges against the real hand and save a hardware preset.
-  **`RECORD:` hardware preset name = ______________**
+- **disarm actually drops torque** — the fingers should go limp, not merely
+  stop updating.
 
-**`TODO(hardware-day)`** the tuner currently offers only `print` and `mujoco`
-backends; wiring its `--backend hardware` is a small follow-up once B4 passes.
+Then raise the limits one at a time, never together:
+
+| flag | bring-up | default | what it means |
+|---|---|---|---|
+| `--hardware-command-scale` | 0.3 | 1.0 | fraction of the commanded angle |
+| `--hardware-max-step-rad` | 0.05 | 0.15 | × 50 Hz = 2.5 rad/s vs 7.5 rad/s |
+| `--hardware-current-limit` | 150 | 350 | goal current cap, mA |
+
+**`RECORD:` highest safe command scale = ________**
+**`RECORD:` working current limit = ________ mA**
+**`RECORD:` working max step = ________ rad**
+
+### B5. Every way of stopping  ☐
+
+All five must drop torque. Test each one deliberately, with the hand armed and
+holding a light object:
+
+| action | expected |
+|---|---|
+| **Disarm** in the browser | limp within one control tick |
+| close the browser tab | limp within ~3 s (client watchdog) |
+| `pkill -f midas-manus-bridge` | limp within 0.5 s (deadman), and a note in the UI |
+| Ctrl-C in the terminal | limp, clean exit |
+| `kill <pid>` (SIGTERM) | limp, clean exit |
+
+After the deadman trips, re-arming is **manual** and deliberate: restarting the
+bridge does not resume tracking on its own.
+
+**`RECORD:` any of the five that did not drop torque = ______________**
+
+### B6. Retune against the real hand  ☐
+
+The tuner is the same one you used in sim, now driving the hand, so retune in
+place and save:
+
+- adjust per-finger ranges and, in dexpilot mode, `scaling_factor`,
+  `abduction_limit` and `project_dist` while watching the hand
+- press **Capture neutral** with your hand in a flat open pose to set the zero
+- save under a new name — the preset now carries that zero pose with it
+
+**`RECORD:` hardware preset name = ______________**
 
 ---
 
@@ -395,4 +440,4 @@ The hand has **no pinky**, so element 4 of the 5-float power vector is always 0.
 | Analytic mode cannot place fingertips relative to each other | Structural: it reads angles, not positions. Use `--mode dexpilot` (A5b). |
 | DexPilot fingertip offsets are CAD estimates | Load-bearing in that mode; measure on hardware. See A5b. |
 | Dual glove untested | See A4. |
-| PIP sign disagreement | See B3. |
+| ~~PIP sign disagreement~~ | Resolved: the two packages agree to 1e-6. See B3. |

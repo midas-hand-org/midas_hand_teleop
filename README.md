@@ -35,23 +35,50 @@ python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &
 midas-manus-teleop --backend mujoco --mujoco-viewer
 ```
 
+## Retargeting modes
+
+Two things can drive the joints, and which one you want depends on the task:
+
+| `--mode` | what it does | use it when |
+|---|---|---|
+| `analytic` | reads angles off the hand and maps them per joint | you want predictable, per-finger control and no solver |
+| `dexpilot` | optimises **fingertip positions relative to each other** | you care about pinches and where the fingertips are with respect to one another |
+
+`analytic` is blind to absolute hand geometry — scaling a hand 0.6×–3× changes
+its output by ~3e-6 rad — so it structurally cannot place fingertips relative
+to each other. `dexpilot` can, at the cost of being sensitive to hand size
+(`scaling_factor`) and to input chirality.
+
+Two further modes, `vector` and `refine`, exist for comparison and are not
+what you want day to day.
+
 ## Tuning UI
 
 ```bash
 python -m midas_hand_teleop.manus_glove.fake_glove_publisher --side right &   # or: midas-manus-bridge &
-midas-hand-tune --open
+midas-hand-tune --mode dexpilot --open
 ```
 
-Then edit any finger's curl scale, output range, splay or smoothing and watch
-that finger change in the sim on the next frame. The page shows the glove rate
-and measured end-to-end latency, the analytic intermediates (curl, splay, thumb
-angles) behind each joint target, and commanded-vs-measured position per joint.
-Presets save to `~/.midas_hand/retarget_presets/` and carry the neutral
-calibration with them.
+Edit any finger's curl scale, output range, splay or smoothing and watch that
+finger change on the next frame. The page shows the glove rate and measured
+end-to-end latency, the intermediates behind each joint target, and
+commanded-vs-measured position per joint. It renders only the controls the
+running mode actually reads, so a slider is never shown dead.
+
+Three separate calibrations, easy to confuse:
+
+| | what it measures | how |
+|---|---|---|
+| **hand size** | your reach and finger spacing vs the robot's | hold a flat open hand, press **Calibrate hand size**; sets `scaling_factor` and `spread_scale` |
+| **zero pose** | which of your poses means "robot at zero" | hold the rest pose, press **Capture neutral** |
+| **homing** | where each motor's encoder zero is | `python -m midas_hand_api --home`, once per hand |
+
+Presets save to `~/.midas_hand/retarget_presets/` and carry the zero pose with
+them, so `--preset <name>` reproduces a session. They do **not** record which
+mode they were tuned in — pass `--mode` too.
 
 Output-range sliders are bounded by the robot's real joint limits, and show
-what percentage of each joint's travel the profile actually commands — the
-built-in defaults reach only 75% of MCP pitch and 84% of PIP.
+what percentage of each joint's travel the profile actually commands.
 
 ## Glove teleop
 
@@ -75,31 +102,57 @@ Keys in the camera window: `c` capture neutral calibration, `r` clear it,
 
 ## Driving the real hand
 
-> The default backend is `print` in every entry point. Nothing energises a
-> motor unless you ask for `--backend hardware`.
+> Nothing energises a motor unless you ask for `--backend hardware`, **and**
+> then arm it. `midas-hand-tune` and `midas-hand-teleop` default to
+> `--backend print`; `midas-manus-teleop` defaults to `mujoco`.
 
 Before the first run, **home the hand** (see `midas_hand_api`) so
 `~/.midas_hand/config.yaml` exists. Without it the motor zero has no defined
-relationship to the URDF zero and the API's joint-limit clamp does nothing, so
-`--backend hardware` is refused; `--allow-unhomed` overrides that if you know
-why you want it.
+relationship to the URDF zero, so `--backend hardware` is refused;
+`--allow-unhomed` overrides that if you know why you want it.
+
+The recommended path is the tuner, because it is the only entry point that
+loads a preset — so it is the only one that runs the settings you tuned:
 
 ```bash
-midas-manus-teleop --backend hardware \
-    --hardware-current-limit 200 \
-    --hardware-command-scale 0.4 \
-    --start-armed
+midas-manus-bridge &
+midas-hand-tune --mode dexpilot --preset my-hand --backend hardware --open \
+    --hardware-current-limit 150 \
+    --hardware-command-scale 0.3 \
+    --hardware-max-step-rad 0.05
 ```
 
-Bring-up order: `--backend print` first to check the targets look sane, then
-`--backend mujoco`, then hardware with a low current limit and a reduced
-command scale. Without `--start-armed` the backend connects and configures but
-leaves torque off until armed, and the first commanded pose is always the
-measured pose, so arming cannot jump.
+It starts **disarmed**. Press *Arm hardware* in the browser when the status bar
+shows a healthy glove. The first commanded pose is the measured pose by
+construction, so arming cannot jump.
 
-A deadman stops commanding and disarms if no glove frame arrives for
-`--stale-timeout` seconds (0.5 by default). Without it the loop would hold a
-commanded pose against a dead publisher indefinitely.
+Raise `--hardware-command-scale` toward 1.0, then the current limit, then the
+slew limit — one at a time.
+
+The headless equivalent, without the UI or the preset:
+
+```bash
+midas-manus-teleop --backend hardware --retarget dexpilot \
+    --hardware-current-limit 150 --hardware-command-scale 0.3 --start-armed
+```
+
+Note `--retarget dexpilot`: without it this runs the analytic map.
+
+### Stopping
+
+Five things drop torque, and all of them are tested:
+
+| | |
+|---|---|
+| *Disarm* in the browser | immediate |
+| closing the browser tab | ~3 s, client watchdog |
+| no glove frame for 0.5 s | deadman; re-arming is manual and deliberate |
+| Ctrl-C, twice if impatient | torque is dropped even on the force-quit path |
+| `kill` / SIGTERM | routed through the same cleanup as Ctrl-C |
+
+Commands are clamped to the robot model's joint limits inside the backend.
+This matters because homing writes ±π into `config.yaml`, which makes the hand
+API's own `clip_positions` a no-op on a correctly homed hand.
 
 ## Entry points
 
@@ -108,7 +161,7 @@ commanded pose against a dead publisher indefinitely.
 | `midas-manus-bridge` | Manus SDK → ZMQ keypoints |
 | `midas-manus-teleop` | glove → retarget → print / MuJoCo / hardware |
 | `midas-hand-teleop` | webcam → retarget → print / MuJoCo / hardware |
-| `midas-hand-tune` | browser tuning UI |
+| `midas-hand-tune` | glove → retarget → print / MuJoCo / hardware, with a browser tuning UI |
 | `midas-hand-diag` | text diagnostics: palm basis, canonical poses, frame presets |
 
 ## Architecture
@@ -118,7 +171,7 @@ Manus glove ──ctypes──▶ manus_bridge ──ZMQ 5710/5711──▶ subs
                                                             │
                                                     (21,3) landmarks
                                                             ▼
-                                          midas_hand_retargeter (analytic)
+                                    midas_hand_retargeter (analytic / dexpilot)
                                                             │
                                                    13 joint targets
                                                             ▼

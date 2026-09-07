@@ -226,3 +226,45 @@ def test_watchdog_leaves_a_headless_run_alone(loop_factory):
     loop._service_arming()
     loop._service_client_watchdog()
     assert state.loop.armed is True, "no browser has EVER polled; nothing was lost"
+
+
+def _bare_backend(command_scale=1.0):
+    from midas_hand_teleop.backends import HardwareBackend
+
+    backend = HardwareBackend.__new__(HardwareBackend)
+    backend.command_scale = command_scale
+    backend.hand = type("H", (), {"clip_positions": staticmethod(lambda x: x)})()
+    return backend
+
+
+def test_commands_are_clamped_to_the_robots_own_limits():
+    """The hand's clip_positions reads limits from ~/.midas_hand/config.yaml,
+    and homing writes those as +/-pi -- so on a correctly homed hand it clips
+    nothing. These are the URDF's, which is what the mechanism allows."""
+
+    from midas_hand_retargeter.constants import HARDWARE_MOTOR_JOINT_NAMES
+
+    from midas_hand_teleop.backends import HardwareBackend
+
+    backend = _bare_backend()
+    wild = np.full(13, 5.0)
+    result = type("R", (), {"hardware_motor_positions": wild})()
+    target = backend._prepare_target(result)
+
+    limits = HardwareBackend._MODEL_LIMITS
+    assert np.all(target <= limits[:, 1] + 1e-9)
+    assert len(target) == len(HARDWARE_MOTOR_JOINT_NAMES)
+
+
+def test_command_scale_cannot_push_past_a_mechanical_stop():
+    """command_scale is applied before the clamp on purpose: a scale > 1 can
+    take a joint the retargeter had bounded correctly straight into a stop."""
+
+    from midas_hand_teleop.backends import HardwareBackend
+
+    at_limit = HardwareBackend._MODEL_LIMITS[:, 0].copy()
+    result = type("R", (), {"hardware_motor_positions": at_limit.copy()})()
+    target = _bare_backend(command_scale=3.0)._prepare_target(result)
+    assert np.allclose(target, at_limit), "scaled past the lower stop"
+    assert np.allclose(result.hardware_motor_positions, at_limit), \
+        "_prepare_target must not scale the caller's array in place"

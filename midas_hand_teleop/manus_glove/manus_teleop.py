@@ -579,17 +579,26 @@ def run(args: argparse.Namespace) -> None:
                     deadman_tripped[0] = True
                     logger.error(
                         "No glove data for %.1fs (> --stale-timeout %.1fs) — "
-                        "holding position and disarming if armed.",
+                        "stopped commanding, and dropping torque if armed. The "
+                        "hand goes limp; re-arm to resume.",
                         stale_s, args.stale_timeout,
                     )
                     disarm = getattr(backend, "disarm", None)
                     if callable(disarm):
                         disarm()
-            else:
+            elif solves > 0:
                 if deadman_tripped[0]:
                     logger.info("Glove data resumed after %.1fs.", stale_s)
                     deadman_tripped[0] = False
                 backend.send(last_control)
+            # `solves > 0` is load-bearing, not defensive. last_control is
+            # seeded to every joint = 0.0, and last_data_time to the start, so
+            # for the first --stale-timeout seconds this branch used to command
+            # the all-zeros pose with no glove frame ever received. On hardware
+            # that is uncommanded motion at power-on: arm() seeds from the
+            # measured pose, then the next tick asks for URDF zero and the slew
+            # limiter walks the whole hand there in ~0.3 s -- inside the
+            # deadman window, so the deadman fires only after it has finished.
             report_maybe()
             next_tick += period
             sleep_s = next_tick - time.monotonic()
