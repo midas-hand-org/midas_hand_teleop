@@ -98,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     # then never energise the hand -- build_backend reads start_armed with a
     # getattr default of False and nothing else ever calls arm().
     add_backend_arguments(parser, default=DEFAULT_BACKEND, include_mujoco=False)
+    parser.add_argument(
+        "--hand-landmarker-model",
+        default=None,
+        help="Optional MediaPipe Tasks hand_landmarker.task path.",
+    )
     parser.add_argument("--mujoco-repo", default=None)
     parser.add_argument("--mujoco-xml", default=None)
     parser.add_argument("--mujoco-viewer", action="store_true")
